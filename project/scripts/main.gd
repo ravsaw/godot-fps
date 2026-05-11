@@ -1,0 +1,893 @@
+extends Node3D
+
+const WORLD_DEBUG_MANAGER_SCRIPT := preload("res://scripts/world_debug.gd")
+const ZONE_MANAGER_SCRIPT := preload("res://scripts/world/zone_manager.gd")
+const SQUAD_MANAGER_SCRIPT := preload("res://scripts/squad_manager.gd")
+const ATTACHMENT_MANAGER_SCRIPT := preload("res://scripts/attachment_manager.gd")
+const ALIFE_MANAGER_SCRIPT := preload("res://scripts/alife_manager.gd")
+const TRANSITION_MANAGER_SCRIPT := preload("res://scripts/transition_manager.gd")
+
+enum DebugMode { NONE = 0, NPC_PICKUPS = 1, NPC_LOCATIONS = 2, ZONE_TRANSITIONS = 3 }
+
+var _debug_mode: DebugMode = DebugMode.NONE
+var _menu_layer: CanvasLayer = null
+
+var _player: Variant = null
+var _weapon: Variant = null
+var _npc: Variant = null
+var _hud: Variant = null
+
+var _respawn_ttl: float = -1.0
+var _zone_transition_cooldown: float = 0.0
+var _map_camera: Camera3D = null
+var _map_mode: bool = false
+var _map_dragging: bool = false
+var _map_drag_last_mouse_pos: Vector2 = Vector2.ZERO
+
+const MAP_ZOOM_STEP: float = 6.0
+const MAP_MIN_SIZE: float = 20.0
+const MAP_MAX_SIZE: float = 140.0
+
+var _npc_manager: NpcManager = null
+var _inventory_manager: InventoryManager = null
+var _spawner: SceneSpawner = null
+var _zone_manager: Variant = null
+var _world_debug: Variant = null
+var _squad_manager: Variant = null
+var _attachment_manager: Variant = null
+var _alife_manager: Variant = null
+var _transition_manager: Variant = null
+var _gate_beacon: Node3D = null
+var _transition_target_zone: StringName = &""
+var _transition_commit_trigger: Area3D = null
+var _transition_from_gate_id: int = -1
+
+
+func _ready() -> void:
+	print("Main scene loaded")
+
+	_npc_manager = NpcManager.new()
+	add_child(_npc_manager)
+
+	_inventory_manager = InventoryManager.new()
+	add_child(_inventory_manager)
+
+	_spawner = SceneSpawner.new()
+	add_child(_spawner)
+
+	_zone_manager = ZONE_MANAGER_SCRIPT.new()
+	add_child(_zone_manager)
+	_zone_manager.connect("zone_transition_started", Callable(self, "_on_zone_transition_started"))
+	_zone_manager.connect("zone_transition_preloaded", Callable(self, "_on_zone_transition_preloaded"))
+	_zone_manager.connect("zone_transition_finished", Callable(self, "_on_zone_transition_finished"))
+
+	_npc_manager.configure_spawn(_spawner, self)
+	_npc_manager.npc_spawned.connect(_on_npc_spawned)
+
+	if ClassDB.class_exists("GameBootstrap"):
+		var bootstrap: Variant = ClassDB.instantiate("GameBootstrap")
+		add_child(bootstrap)
+		print("GameBootstrap instantiated from GDExtension")
+
+	_show_debug_menu()
+
+
+# ---------------------------------------------------------------------------
+# Debug map selection menu
+# ---------------------------------------------------------------------------
+
+func _show_debug_menu() -> void:
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+	_menu_layer = CanvasLayer.new()
+	_menu_layer.name = "DebugMenu"
+	add_child(_menu_layer)
+
+	var panel := PanelContainer.new()
+	panel.set_anchors_preset(Control.PRESET_CENTER)
+	_menu_layer.add_child(panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.custom_minimum_size = Vector2(460, 0)
+	panel.add_child(vbox)
+
+	var title := Label.new()
+	title.text = "DEBUG MAP SELECT"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 22)
+	vbox.add_child(title)
+
+	vbox.add_child(_make_separator())
+
+	vbox.add_child(_make_map_button(
+		"1 — NPC + Pickups",
+		"Gracz, broń, NPC w walce.\nLoot do podniesienia na ziemi.\nKlasyczny sandbox combat.",
+		DebugMode.NPC_PICKUPS
+	))
+
+	vbox.add_child(_make_separator())
+
+	vbox.add_child(_make_map_button(
+		"2 — NPC + Lokacje (ALife)",
+		"Gracz, broń, NPC.\nDebug świat: SmartLocacje, WorldGraph,\nSquady ALife, TransitionManager.",
+		DebugMode.NPC_LOCATIONS
+	))
+
+	vbox.add_child(_make_separator())
+
+	vbox.add_child(_make_map_button(
+		"3 — Przejścia między strefami",
+		"Gracz przy bramie strefy.\nDebug grafu, gate triggery, seamless\nprzejście zone_a ↔ zone_b.",
+		DebugMode.ZONE_TRANSITIONS
+	))
+
+
+func _make_separator() -> HSeparator:
+	return HSeparator.new()
+
+
+func _make_map_button(title_text: String, desc_text: String, mode: DebugMode) -> VBoxContainer:
+	var row := VBoxContainer.new()
+
+	var btn := Button.new()
+	btn.text = title_text
+	btn.custom_minimum_size = Vector2(0, 44)
+	btn.pressed.connect(_on_map_selected.bind(mode))
+	row.add_child(btn)
+
+	var desc := Label.new()
+	desc.text = desc_text
+	desc.add_theme_font_size_override("font_size", 11)
+	desc.add_theme_color_override("font_color", Color(0.75, 0.75, 0.75))
+	row.add_child(desc)
+
+	return row
+
+
+func _on_map_selected(mode: DebugMode) -> void:
+	_debug_mode = mode
+	if _menu_layer != null:
+		_menu_layer.queue_free()
+		_menu_layer = null
+
+	_spawn_base_nodes()
+	_setup_debug_hud()
+	_attachment_manager = ATTACHMENT_MANAGER_SCRIPT.new()
+	add_child(_attachment_manager)
+	_attachment_manager.attachment_event.connect(_show_event)
+	_attachment_manager.setup(_weapon, _inventory_manager, _hud)
+	_attachment_manager.mark_equipped("ACOG Scope")
+
+	match mode:
+		DebugMode.NPC_PICKUPS:
+			_boot_npc_pickups()
+		DebugMode.NPC_LOCATIONS:
+			_boot_npc_locations()
+		DebugMode.ZONE_TRANSITIONS:
+			_boot_zone_transitions()
+
+
+# ---------------------------------------------------------------------------
+# Shared base: player + weapon + environment + nav
+# ---------------------------------------------------------------------------
+
+func _spawn_base_nodes() -> void:
+	_player = _spawner.spawn_player()
+	if _player == null:
+		return
+	_player.connect("player_died", Callable(self, "_on_player_died"))
+	_npc_manager.set_player(_player)
+
+	_weapon = _spawner.spawn_weapon(_player)
+	if _weapon != null:
+		_weapon.connect("fired", Callable(self, "_on_weapon_fired"))
+		_weapon.connect("bullet_hit", Callable(self, "_on_weapon_bullet_hit"))
+		_weapon.connect("reloaded", Callable(self, "_on_weapon_reloaded"))
+		_weapon.connect("durability_changed", Callable(self, "_on_weapon_durability_changed"))
+		_weapon.connect("weapon_jammed", Callable(self, "_on_weapon_jammed"))
+
+	_spawner.spawn_environment(self)
+	_sync_loaded_zone_visuals()
+	_spawner.spawn_navigation_region(self)
+	_setup_map_camera()
+
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+
+
+# ---------------------------------------------------------------------------
+# Mode 1: NPC + Pickups
+# ---------------------------------------------------------------------------
+
+func _boot_npc_pickups() -> void:
+	# Spawn one NPC and loot items on the floor
+	var npc: Variant = _spawner.spawn_npc()
+	if npc != null:
+		_npc = npc
+		_npc_manager.set_npc(npc)
+		npc.connect("npc_died", Callable(self, "_on_npc_died"))
+	_spawner.spawn_loot_items(self)
+	_show_event("Map 1: NPC + Pickups")
+
+
+# ---------------------------------------------------------------------------
+# Mode 2: NPC + Locations (ALife world)
+# ---------------------------------------------------------------------------
+
+func _boot_npc_locations() -> void:
+	# Spawn one NPC
+	var npc: Variant = _spawner.spawn_npc()
+	if npc != null:
+		_npc = npc
+		_npc_manager.set_npc(npc)
+		npc.connect("npc_died", Callable(self, "_on_npc_died"))
+
+	_world_debug = WORLD_DEBUG_MANAGER_SCRIPT.new()
+	add_child(_world_debug)
+	_world_debug.setup(_zone_manager, self)
+	_world_debug.zone_gate_entered.connect(_on_zone_gate_entered)
+	_world_debug.rebuild()
+
+	_squad_manager = SQUAD_MANAGER_SCRIPT.new()
+	add_child(_squad_manager)
+	_squad_manager.squad_event.connect(_show_event)
+	_squad_manager.setup(_zone_manager, self)
+
+	_alife_manager = ALIFE_MANAGER_SCRIPT.new()
+	add_child(_alife_manager)
+	_alife_manager.setup(_zone_manager, _squad_manager)
+	_alife_manager.strategic_tick.connect(_show_event)
+
+	_transition_manager = TRANSITION_MANAGER_SCRIPT.new()
+	add_child(_transition_manager)
+	_transition_manager.setup(_player, _squad_manager, self)
+
+	_show_event("Map 2: NPC + ALife Locations")
+
+
+# ---------------------------------------------------------------------------
+# Mode 3: Zone Transitions
+# ---------------------------------------------------------------------------
+
+func _boot_zone_transitions() -> void:
+	# Spawn near current region edge gate.
+	# Use .position (local) — player added via call_deferred, not in tree yet
+	if _player != null and is_instance_valid(_player):
+		_player.position = Vector3(8, 2, 0)
+
+	_world_debug = WORLD_DEBUG_MANAGER_SCRIPT.new()
+	add_child(_world_debug)
+	_world_debug.setup(_zone_manager, self)
+	_world_debug.zone_gate_entered.connect(_on_zone_gate_entered)
+	_world_debug.rebuild()
+
+	var current_zone: StringName = _zone_manager.get_current_zone_id()
+	var next_zone: StringName = _zone_manager.get_gate_target_zone(current_zone)
+	var beacon_pos: Vector3 = _zone_manager.get_transition_gate_position(current_zone, next_zone)
+	_spawn_gate_beacon(current_zone, next_zone, beacon_pos)
+
+	_show_event("Map 3: Przejście między strefami")
+	_show_event(">> Idź do SŁUPA [EDGE] na krawędzi regionu <<")
+	_show_event("Regiony tranzytowe mają własną podłogę")
+	_show_event("[F1] Powrót do menu")
+
+
+# ---------------------------------------------------------------------------
+# Continuing processing / input (same for all modes)
+# ---------------------------------------------------------------------------
+
+
+func _process(delta: float) -> void:
+	if _npc_manager != null:
+		_npc_manager.process(delta)
+
+	if _zone_transition_cooldown > 0.0:
+		_zone_transition_cooldown = maxf(0.0, _zone_transition_cooldown - delta)
+
+	_update_respawn_timers(delta)
+	_update_debug_hud(delta)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if _map_mode and event is InputEventMouseMotion and _map_dragging:
+		_pan_map_camera(event.relative)
+		return
+
+	if event is InputEventMouseButton and _map_mode and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_try_issue_map_move_order(event.position, event.shift_pressed)
+		return
+	if _map_mode and event is InputEventMouseButton:
+		match event.button_index:
+			MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE:
+				_map_dragging = event.pressed
+				_map_drag_last_mouse_pos = event.position
+				return
+			MOUSE_BUTTON_WHEEL_UP:
+				if event.pressed:
+					_set_map_zoom(_map_camera.size - MAP_ZOOM_STEP)
+				return
+			MOUSE_BUTTON_WHEEL_DOWN:
+				if event.pressed:
+					_set_map_zoom(_map_camera.size + MAP_ZOOM_STEP)
+				return
+
+	if not (event is InputEventKey and event.pressed and not event.echo):
+		return
+
+	if event.keycode == KEY_F1 and _debug_mode != DebugMode.NONE:
+		_teardown_world()
+		_show_debug_menu()
+		return
+
+	if event.keycode == KEY_I:
+		_attachment_manager.toggle_menu()
+		_show_event("Attachment menu open" if _attachment_manager.is_menu_open() else "Attachment menu closed")
+		return
+
+	if _attachment_manager.is_menu_open():
+		match event.keycode:
+			KEY_UP, KEY_W:
+				_attachment_manager.menu_navigate(-1)
+				return
+			KEY_DOWN, KEY_S:
+				_attachment_manager.menu_navigate(1)
+				return
+			KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+				_attachment_manager.menu_confirm()
+				return
+
+	if _map_mode:
+		match event.keycode:
+			KEY_TAB:
+				if _squad_manager != null:
+					var next_name: String = String(_squad_manager.select_next_squad())
+					if not next_name.is_empty():
+						_show_event("Selected squad: " + next_name)
+				return
+			KEY_C:
+				if _squad_manager != null:
+					if Input.is_key_pressed(KEY_SHIFT):
+						if _squad_manager.request_clear_all_squad_goals():
+							_show_event("Cleared goals for all squads")
+					else:
+						if _squad_manager.request_clear_selected_squad_goal():
+							_show_event("Cleared selected squad goal")
+				return
+
+	match event.keycode:
+		KEY_1:
+			_attachment_manager.try_equip("ACOG Scope")
+		KEY_2:
+			_attachment_manager.try_equip("Suppressor")
+		KEY_3:
+			_attachment_manager.try_equip("Stock Attachment")
+		KEY_0:
+			_attachment_manager.clear_all()
+		KEY_M:
+			_toggle_map()
+
+
+func _setup_debug_hud() -> void:
+	var hud_script: Variant = load("res://scripts/hud.gd")
+	if hud_script == null:
+		return
+
+	var hud_layer: Variant = hud_script.new()
+	if hud_layer == null:
+		return
+
+	add_child(hud_layer)
+	_hud = hud_layer
+	_inventory_manager.set_hud(_hud)
+
+
+func _setup_map_camera() -> void:
+	_map_camera = Camera3D.new()
+	_map_camera.name = "MapCamera"
+	_map_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	_map_camera.size = 70.0
+	_map_camera.position = Vector3(23, 80, 0)
+	_map_camera.rotation_degrees = Vector3(-90, 0, 0)
+	add_child(_map_camera)
+
+
+func _toggle_map() -> void:
+	_map_mode = not _map_mode
+	if _map_mode:
+		if _map_camera != null and is_instance_valid(_map_camera):
+			_map_camera.make_current()
+		_set_player_input_enabled(false)
+		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+		_show_event("[M] Map ON")
+		_show_event("LMB: select/target | Shift+LMB: all squads | Tab: next squad | C: clear goal")
+	else:
+		var player_cam: Camera3D = _player.get_node_or_null("PlayerCamera") if _player != null and is_instance_valid(_player) else null
+		if player_cam != null:
+			player_cam.make_current()
+		_set_player_input_enabled(true)
+		_map_dragging = false
+		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+		_show_event("[M] Map OFF")
+
+
+func _update_debug_hud(delta: float) -> void:
+	var hp_text := "HP: n/a"
+	var hp_value: float = 0.0
+	if _player != null and _player.has_method("get_health"):
+		hp_value = float(_player.call("get_health"))
+		hp_text = "HP: " + str(hp_value)
+
+	var ammo_text := "Ammo: n/a"
+	var mag: int = 0
+	var reserve: int = 0
+	if _weapon != null:
+		if _weapon.has_method("get_ammo_in_mag"):
+			mag = int(_weapon.call("get_ammo_in_mag"))
+		if _weapon.has_method("get_ammo_reserve"):
+			reserve = int(_weapon.call("get_ammo_reserve"))
+		ammo_text = "Ammo: " + str(mag) + " / " + str(reserve)
+
+	if _weapon != null and _weapon.has_method("get_durability_percent"):
+		var durability: float = float(_weapon.call("get_durability_percent"))
+		if _hud != null and _hud.has_method("set_durability"):
+			_hud.call("set_durability", durability)
+
+	var npc_state_text := "n/a"
+	if _npc != null and is_instance_valid(_npc) and _npc.has_method("get_state"):
+		npc_state_text = str(int(_npc.call("get_state")))
+
+	var npc_debug_text := "NPC s=" + npc_state_text \
+		+ " d=" + str(snappedf(_npc_manager._last_distance_to_player, 0.01)) \
+		+ " los=" + str(_npc_manager._last_los_ok) \
+		+ " block=" + _npc_manager._last_attack_block_reason
+
+	var world_debug_text := "World: n/a"
+	if _zone_manager != null and _player != null and is_instance_valid(_player):
+		world_debug_text = _zone_manager.get_zone_debug_text(_player.global_position)
+		if _squad_manager != null:
+			world_debug_text += "\n" + _squad_manager.get_status_text()
+		if _alife_manager != null:
+			world_debug_text += "\n" + _alife_manager.get_debug_text()
+
+	var map_overlay_text := ""
+	if _map_mode:
+		var map_cmd_text := "MapCmd: n/a"
+		if _squad_manager != null and _squad_manager.has_method("get_map_debug_text"):
+			map_cmd_text = String(_squad_manager.call("get_map_debug_text"))
+		map_overlay_text = "\n" + map_cmd_text + "\nLegend: yellow ring=selected squad, orange orb=goal, orange line=route"
+
+	var view_mode_text := "View: MAP" if _map_mode else "View: FPS"
+	var controls_text := "Keys: M map, LMB select/assign, Shift+LMB all squads, Tab cycle squad, C clear goal, RMB/MMB drag, Wheel zoom | F1 menu"
+
+	if _hud != null:
+		if _hud.has_method("set_status_text"):
+			_hud.call("set_status_text", hp_text + "\n" + ammo_text + "\n" + view_mode_text + "\n" + npc_debug_text + "\n" + world_debug_text + map_overlay_text + "\nUse gate trigger to switch zone\n" + controls_text)
+		if _hud.has_method("set_hp"):
+			_hud.call("set_hp", hp_value)
+		if _hud.has_method("set_ammo"):
+			_hud.call("set_ammo", mag, reserve)
+		if _hud.has_method("tick"):
+			_hud.call("tick", delta)
+
+
+func _update_respawn_timers(delta: float) -> void:
+	if _respawn_ttl > 0.0:
+		_respawn_ttl -= delta
+		if _respawn_ttl <= 0.0:
+			_try_respawn_player()
+
+
+func _try_respawn_player() -> void:
+	if _player == null or not is_instance_valid(_player):
+		return
+
+	_player.global_position = Vector3(10, 10, 0)
+	_player.velocity = Vector3.ZERO
+
+	if _weapon != null and _weapon.has_method("reset_durability"):
+		_weapon.call("reset_durability")
+
+	if _player.has_method("heal"):
+		_player.call("heal", 100)
+
+	if _weapon != null and _weapon.has_method("set_ammo_counts"):
+		_weapon.call("set_ammo_counts", 30, 240)
+
+	_show_event("PLAYER RESPAWNED")
+
+
+func _show_event(message: String) -> void:
+	if _hud != null and _hud.has_method("show_event"):
+		_hud.call("show_event", message)
+
+
+func _show_hitmarker() -> void:
+	if _hud != null and _hud.has_method("show_hitmarker"):
+		_hud.call("show_hitmarker")
+
+
+func _on_player_died() -> void:
+	_show_event("PLAYER DEAD")
+	_respawn_ttl = 2.0
+
+
+func _on_npc_died(p_npc_id: int, p_source_id: int) -> void:
+	print("NPC died:", p_npc_id, "source:", p_source_id)
+	_show_event("NPC " + str(p_npc_id) + " down")
+	_npc = null
+	_npc_manager.clear_npc()
+	_npc_manager.schedule_respawn(3.0)
+
+
+func _on_npc_spawned(npc: Variant) -> void:
+	_npc = npc
+	if _npc != null and is_instance_valid(_npc):
+		_npc.connect("npc_died", Callable(self, "_on_npc_died"))
+	_show_event("NPC RESPAWN")
+
+
+func _on_weapon_fired(ammo_in_mag: int, reserve: int) -> void:
+	if _hud != null and _hud.has_method("set_ammo"):
+		_hud.call("set_ammo", ammo_in_mag, reserve)
+
+
+func _on_weapon_bullet_hit(hit_success: bool, target_id: int, _hit_position: Vector3) -> void:
+	if hit_success:
+		_show_event("Hit id=" + str(target_id))
+		_show_hitmarker()
+
+
+func _on_weapon_reloaded(new_mag: int, reserve: int) -> void:
+	_show_event("Reloaded")
+	if _hud != null and _hud.has_method("set_ammo"):
+		_hud.call("set_ammo", new_mag, reserve)
+
+
+func _on_weapon_durability_changed(percent: float) -> void:
+	if _hud != null and _hud.has_method("set_durability"):
+		_hud.call("set_durability", percent)
+
+
+func _on_weapon_jammed() -> void:
+	_show_event("WEAPON JAMMED!")
+
+
+# ---------------------------------------------------------------------------
+# Gate beacon for mode 3
+# ---------------------------------------------------------------------------
+
+func _spawn_gate_beacon(from_zone_id: StringName, to_zone_id: StringName, pos: Vector3) -> void:
+	var beacon := Node3D.new()
+	beacon.name = "GateBeacon"
+	beacon.position = pos
+	add_child(beacon)
+	_gate_beacon = beacon
+
+	var accent := _zone_accent_color(to_zone_id)
+
+	var pillar := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(0.5, 5.0, 0.5)
+	pillar.mesh = box
+	pillar.position = Vector3(0, 2.5, 0)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = accent
+	mat.emission_enabled = true
+	mat.emission = accent
+	mat.emission_energy_multiplier = 3.0
+	pillar.material_override = mat
+	beacon.add_child(pillar)
+
+	var zone_label := Label3D.new()
+	zone_label.text = "BRAMA EDGE\n%s -> %s\n%s" % [
+		_zone_display_name(from_zone_id),
+		_zone_display_name(to_zone_id),
+		"[TRANSITION]" if String(to_zone_id).begins_with("zone_t_") else "[REGION]",
+	]
+	zone_label.position = Vector3(0, 6.2, 0)
+	zone_label.modulate = accent
+	zone_label.font_size = 52
+	zone_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	beacon.add_child(zone_label)
+
+
+func _zone_display_name(zone_id: StringName) -> String:
+	match zone_id:
+		&"zone_a":
+			return "Region A"
+		&"zone_t_ab":
+			return "Przejscie A-B"
+		&"zone_b":
+			return "Region B"
+		&"zone_t_bc":
+			return "Przejscie B-C"
+		&"zone_c":
+			return "Region C"
+		_:
+			return String(zone_id)
+
+
+func _zone_accent_color(zone_id: StringName) -> Color:
+	match zone_id:
+		&"zone_a":
+			return Color(0.86, 0.80, 0.30)
+		&"zone_t_ab":
+			return Color(0.32, 0.86, 0.96)
+		&"zone_b":
+			return Color(0.95, 0.54, 0.22)
+		&"zone_t_bc":
+			return Color(0.36, 0.68, 0.98)
+		&"zone_c":
+			return Color(0.82, 0.50, 0.92)
+		_:
+			return Color(1.0, 0.85, 0.2)
+
+
+# ---------------------------------------------------------------------------
+# Teardown world (called before returning to menu via F1)
+# ---------------------------------------------------------------------------
+
+func _teardown_world() -> void:
+	# Managers / overlays that are direct children of self
+	for node: Variant in [_world_debug, _squad_manager, _alife_manager,
+			_transition_manager, _attachment_manager, _hud]:
+		if node != null and is_instance_valid(node):
+			node.queue_free()
+
+	# Named nodes added to self by spawner / setup
+	for node_name: String in ["Sun", "WorldEnvironment", "FloorZoneA", "FloorZoneTAB", "FloorZoneB", "FloorZoneTBC", "FloorZoneC", "NavRegion",
+			"MapCamera", "GateBeacon", "TransitionGuide"]:
+		var n: Node = get_node_or_null(node_name)
+		if n != null:
+			n.queue_free()
+
+	# Player and NPC are children of scene root (added via get_tree().get_root())
+	var root: Window = get_tree().get_root()
+	for node_name: String in ["PlayerController", "TestNPC"]:
+		var n: Node = root.get_node_or_null(node_name)
+		if n != null:
+			n.queue_free()
+
+	_player = null
+	_weapon = null
+	_npc = null
+	_hud = null
+	_map_camera = null
+	_world_debug = null
+	_squad_manager = null
+	_attachment_manager = null
+	_alife_manager = null
+	_transition_manager = null
+	_gate_beacon = null
+	_transition_commit_trigger = null
+	_transition_target_zone = &""
+	_transition_from_gate_id = -1
+	_debug_mode = DebugMode.NONE
+	_map_mode = false
+	_respawn_ttl = -1.0
+	_zone_transition_cooldown = 0.0
+	if _zone_manager != null:
+		_zone_manager.call("_load_zone", &"zone_a")
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+
+func _on_zone_transition_started(from_id: StringName, to_id: StringName) -> void:
+	_show_event("Zone transition: %s -> %s" % [String(from_id), String(to_id)])
+	_play_zone_flash()
+
+
+func _on_zone_transition_preloaded(from_id: StringName, to_id: StringName) -> void:
+	_show_event("Loaded next region: %s + %s" % [String(from_id), String(to_id)])
+	_sync_loaded_zone_visuals()
+	if _world_debug != null:
+		_world_debug.rebuild()
+	_spawn_transition_guide(from_id, to_id)
+	_show_event("Przejście aktywne: idź do strefy docelowej")
+
+
+func _play_zone_flash() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 99
+	add_child(layer)
+	var rect := ColorRect.new()
+	rect.color = Color(0.9, 0.95, 1.0, 0.85)
+	rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(rect)
+	var tween := create_tween()
+	tween.tween_property(rect, "color:a", 0.0, 0.7).set_ease(Tween.EASE_OUT)
+	tween.tween_callback(layer.queue_free)
+
+
+func _on_zone_transition_finished(_from_id: StringName, to_id: StringName) -> void:
+	_clear_transition_guide()
+	_sync_loaded_zone_visuals()
+	if _world_debug != null:
+		_world_debug.rebuild()
+	if _squad_manager != null:
+		_squad_manager.rebuild()
+	if _debug_mode == DebugMode.ZONE_TRANSITIONS:
+		if _gate_beacon != null and is_instance_valid(_gate_beacon):
+			_gate_beacon.queue_free()
+			_gate_beacon = null
+		var next_target: StringName = _zone_manager.get_gate_target_zone(to_id)
+		var beacon_pos: Vector3 = _zone_manager.get_transition_gate_position(to_id, next_target)
+		if beacon_pos == Vector3.ZERO:
+			beacon_pos = _zone_manager.get_transition_gate_position(to_id, _from_id)
+		_spawn_gate_beacon(to_id, next_target, beacon_pos)
+		_show_event("Jesteś w: " + _zone_display_name(to_id))
+		_show_event("Następny cel: " + _zone_display_name(next_target))
+		_show_event(">> Idź do SŁUPA [EDGE] <<")
+
+
+func _on_zone_gate_entered(body: Node3D, target_zone_id: StringName, from_location_id: int) -> void:
+	if _zone_manager == null:
+		return
+	if _zone_transition_cooldown > 0.0:
+		return
+	if _player == null or not is_instance_valid(_player):
+		return
+	if body != _player:
+		return
+	if _zone_manager.get_current_zone_id() == target_zone_id or _zone_manager.is_transitioning():
+		return
+
+	_transition_from_gate_id = from_location_id
+	_zone_transition_cooldown = 2.0
+	_zone_manager.request_zone_transition(target_zone_id)
+
+
+func _on_transition_commit_entered(body: Node3D) -> void:
+	if body != _player:
+		return
+	if _zone_manager == null or not _zone_manager.is_transitioning():
+		return
+	if _transition_target_zone == &"":
+		return
+	if _zone_manager.get_current_zone_id() == _transition_target_zone:
+		return
+	_show_event("Wejście do regionu: " + String(_transition_target_zone))
+	_zone_manager.commit_zone_transition()
+
+
+func _sync_loaded_zone_visuals() -> void:
+	if _spawner == null or _zone_manager == null:
+		return
+	_spawner.set_zone_lods(self, _zone_manager.get_zone_lod_map())
+
+
+func _set_player_input_enabled(enabled: bool) -> void:
+	if _player == null or not is_instance_valid(_player):
+		return
+	if _player.has_method("set_input_enabled"):
+		_player.call("set_input_enabled", enabled)
+
+
+func _set_map_zoom(new_size: float) -> void:
+	if _map_camera == null or not is_instance_valid(_map_camera):
+		return
+	_map_camera.size = clampf(new_size, MAP_MIN_SIZE, MAP_MAX_SIZE)
+
+
+func _pan_map_camera(relative: Vector2) -> void:
+	if _map_camera == null or not is_instance_valid(_map_camera):
+		return
+	var viewport_size := get_viewport().get_visible_rect().size
+	if viewport_size.x <= 0.0 or viewport_size.y <= 0.0:
+		return
+	var units_per_pixel := _map_camera.size / viewport_size.y
+	_map_camera.position.x -= relative.x * units_per_pixel
+	_map_camera.position.z -= relative.y * units_per_pixel
+
+
+func _try_issue_map_move_order(screen_pos: Vector2, all_squads: bool = false) -> void:
+	if _map_camera == null or not is_instance_valid(_map_camera):
+		return
+	if _zone_manager == null or _squad_manager == null:
+		return
+
+	var ray_origin: Vector3 = _map_camera.project_ray_origin(screen_pos)
+	var ray_dir: Vector3 = _map_camera.project_ray_normal(screen_pos)
+	if absf(ray_dir.y) < 0.0001:
+		return
+
+	var distance_to_ground := -ray_origin.y / ray_dir.y
+	if distance_to_ground < 0.0:
+		return
+	var world_pos := ray_origin + ray_dir * distance_to_ground
+
+	var squad_name: String = String(_squad_manager.get_nearest_squad_name(world_pos))
+	if not squad_name.is_empty():
+		if _squad_manager.select_squad(squad_name):
+			_show_event("Selected squad: " + squad_name)
+		return
+
+	var nearest: SmartLocation = _zone_manager.get_nearest_location(world_pos)
+	if nearest == null:
+		return
+	if nearest.world_position.distance_to(world_pos) > 4.5:
+		_show_event("Kliknij bliżej znacznika lokacji")
+		return
+	var location_key := String(_zone_manager.get_location_key_for_graph_id(nearest.location_id))
+	if location_key.is_empty():
+		return
+
+	if all_squads:
+		if _squad_manager.request_move_all_squads_to_location_key(location_key):
+			_show_event("All squads moving to %s" % location_key)
+		return
+
+	var selected_squad: String = String(_squad_manager.get_selected_squad_name())
+	if selected_squad.is_empty():
+		_show_event("Najpierw wybierz squad klikając jego znacznik")
+		return
+
+	if _squad_manager.request_move_selected_squad_to_location_key(location_key):
+		_show_event("%s moving to %s" % [selected_squad, location_key])
+
+
+func _spawn_transition_guide(from_zone_id: StringName, to_zone_id: StringName) -> void:
+	_clear_transition_guide()
+	_transition_target_zone = to_zone_id
+
+	var from_pos: Vector3 = _zone_manager.get_transition_gate_position(from_zone_id, to_zone_id, _transition_from_gate_id)
+	var to_pos: Vector3 = _zone_manager.get_transition_gate_position(to_zone_id, from_zone_id)
+	if from_pos == Vector3.ZERO:
+		from_pos = _zone_manager.get_transition_gate_position(from_zone_id, to_zone_id)
+	if to_pos == Vector3.ZERO:
+		to_pos = from_pos + Vector3(4, 0, 0)
+
+	var guide := Node3D.new()
+	guide.name = "TransitionGuide"
+	add_child(guide)
+
+	# Corridor line between gates to visualize overlap traversal.
+	var delta := to_pos - from_pos
+	var distance := delta.length()
+	if distance > 0.05:
+		var corridor := MeshInstance3D.new()
+		var mesh := CylinderMesh.new()
+		mesh.top_radius = 0.55
+		mesh.bottom_radius = 0.55
+		mesh.height = distance
+		corridor.mesh = mesh
+		corridor.position = from_pos + delta * 0.5 + Vector3(0, 1.0, 0)
+		corridor.look_at_from_position(corridor.position, to_pos + Vector3(0, 1.0, 0), Vector3.UP)
+		corridor.rotate_object_local(Vector3.RIGHT, deg_to_rad(90.0))
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.35, 0.8, 1.0, 0.4)
+		mat.emission_enabled = true
+		mat.emission = Color(0.35, 0.8, 1.0)
+		mat.emission_energy_multiplier = 1.8
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		corridor.material_override = mat
+		guide.add_child(corridor)
+
+	var commit_area := Area3D.new()
+	commit_area.name = "TransitionCommitTrigger"
+	commit_area.position = to_pos + Vector3(0, 0.85, 0)
+	var shape := CollisionShape3D.new()
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = 1.6
+	capsule.height = 2.2
+	shape.shape = capsule
+	commit_area.add_child(shape)
+	commit_area.body_entered.connect(_on_transition_commit_entered)
+	guide.add_child(commit_area)
+	_transition_commit_trigger = commit_area
+
+	var label := Label3D.new()
+	label.text = "WEJSCIE REGIONU\n" + String(to_zone_id)
+	label.position = to_pos + Vector3(0, 3.1, 0)
+	label.modulate = Color(0.35, 0.85, 1.0, 0.98)
+	label.font_size = 44
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	guide.add_child(label)
+
+
+func _clear_transition_guide() -> void:
+	if _transition_commit_trigger != null and is_instance_valid(_transition_commit_trigger):
+		_transition_commit_trigger = null
+	var guide := get_node_or_null("TransitionGuide")
+	if guide != null:
+		guide.queue_free()
+	_transition_target_zone = &""
+	_transition_from_gate_id = -1

@@ -1,0 +1,12 @@
+.godot/
+.scons_cache/
+bin/
+project/bin/
+build/
+*.so
+*.dll
+*.dylib
+*.obj
+*.pdb
+*.ilk
+.vscode/

@@ -1,0 +1,12 @@
+[configuration]
+entry_symbol = "godot_fps_library_init"
+compatibility_minimum = "4.2"
+reloadable = true
+
+[libraries]
+windows.debug.x86_64 = "res://bin/godot_fps.windows.template_debug.x86_64.dll"
+windows.release.x86_64 = "res://bin/godot_fps.windows.template_release.x86_64.dll"
+linux.debug.x86_64 = "res://bin/godot_fps.linux.template_debug.x86_64.so"
+linux.release.x86_64 = "res://bin/godot_fps.linux.template_release.x86_64.so"
+macos.debug = "res://bin/godot_fps.macos.template_debug.universal.dylib"
+macos.release = "res://bin/godot_fps.macos.template_release.universal.dylib"
