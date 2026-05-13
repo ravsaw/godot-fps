@@ -6,6 +6,7 @@
 #include <godot_cpp/variant/variant.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
+#include <vector>
 
 namespace godot {
 
@@ -41,6 +42,8 @@ private:
     bool arrived_this_frame = false;
     Vector3 computed_position;
     TypedArray<Vector3> formation_positions;
+
+    std::vector<int64_t> goal_stack;
 
 protected:
     static void _bind_methods();
@@ -93,6 +96,14 @@ public:
     int64_t get_formation_type() const;
     bool get_arrived_this_frame() const;
     Vector3 get_computed_position() const;
+
+    // Goal stack (TIER 2 C++ migration)
+    int64_t get_active_goal() const;
+    void set_explicit_goal(int64_t goal_id);
+    void push_low_priority_goal(int64_t goal_id);
+    int64_t pop_goal_and_get_next();
+    int64_t get_goal_stack_size() const;
+    void clear_goal();
 };
 
 } // namespace godot

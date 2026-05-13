@@ -45,6 +45,14 @@ void SquadData::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_arrived_this_frame"), &SquadData::get_arrived_this_frame);
     ClassDB::bind_method(D_METHOD("get_computed_position"), &SquadData::get_computed_position);
 
+    // TIER 2 goal stack methods
+    ClassDB::bind_method(D_METHOD("get_active_goal"), &SquadData::get_active_goal);
+    ClassDB::bind_method(D_METHOD("set_explicit_goal", "goal_id"), &SquadData::set_explicit_goal);
+    ClassDB::bind_method(D_METHOD("push_low_priority_goal", "goal_id"), &SquadData::push_low_priority_goal);
+    ClassDB::bind_method(D_METHOD("pop_goal_and_get_next"), &SquadData::pop_goal_and_get_next);
+    ClassDB::bind_method(D_METHOD("get_goal_stack_size"), &SquadData::get_goal_stack_size);
+    ClassDB::bind_method(D_METHOD("clear_goal"), &SquadData::clear_goal);
+
     ADD_PROPERTY(PropertyInfo(Variant::STRING, "squad_name"), "set_squad_name", "get_squad_name");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "faction_id"), "set_faction_id", "get_faction_id");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "current_location_id"), "set_current_location_id", "get_current_location_id");
@@ -271,4 +279,36 @@ bool SquadData::get_arrived_this_frame() const {
 
 Vector3 SquadData::get_computed_position() const {
     return computed_position;
+}
+
+int64_t SquadData::get_active_goal() const {
+    if (goal_stack.empty()) return -1;
+    return goal_stack.front();
+}
+
+void SquadData::set_explicit_goal(int64_t goal_id) {
+    goal_stack.clear();
+    goal_stack.push_back(goal_id);
+}
+
+void SquadData::push_low_priority_goal(int64_t goal_id) {
+    if (goal_stack.empty()) {
+        goal_stack.push_back(goal_id);
+    }
+}
+
+int64_t SquadData::pop_goal_and_get_next() {
+    if (!goal_stack.empty()) {
+        goal_stack.erase(goal_stack.begin());
+    }
+    if (goal_stack.empty()) return -1;
+    return goal_stack.front();
+}
+
+int64_t SquadData::get_goal_stack_size() const {
+    return static_cast<int64_t>(goal_stack.size());
+}
+
+void SquadData::clear_goal() {
+    goal_stack.clear();
 }

@@ -9,9 +9,6 @@ var _scene_root: Node3D = null
 var _squads: Array[SquadData] = []
 var _visuals: Dictionary = {}
 var _forced_next_target_by_name: Dictionary = {}
-# goal stack per squad: index 0 = active goal; explicit orders replace entire stack;
-# low-priority goals (return_home) are pushed only when stack is empty.
-var _goal_stack_by_name: Dictionary = {}  # squad_name -> Array[int]
 var _root: Node3D = null
 var _sim_ttl_by_name: Dictionary = {}
 var _selected_squad_name: String = ""
@@ -29,43 +26,11 @@ const FAR_SIM_INTERVAL: float = 0.55
 
 
 
-func _get_active_goal(squad_name: String) -> int:
-	var stack: Array = _goal_stack_by_name.get(squad_name, [])
-	if stack.is_empty():
-		return -1
-	return int(stack[0])
-
-
-func _set_explicit_goal(squad_name: String, goal_id: int) -> void:
-	_goal_stack_by_name[squad_name] = [goal_id]
-
-
-func _push_low_priority_goal(squad_name: String, goal_id: int) -> void:
-	var stack: Array = _goal_stack_by_name.get(squad_name, [])
-	if stack.is_empty():
-		_goal_stack_by_name[squad_name] = [goal_id]
-
-
-func _pop_goal_and_get_next(squad_name: String) -> int:
-	var stack: Array = _goal_stack_by_name.get(squad_name, [])
-	if not stack.is_empty():
-		stack.pop_front()
-	if stack.is_empty():
-		_goal_stack_by_name.erase(squad_name)
-		return -1
-	return int(stack[0])
-
-
-func _get_goal_stack_size(squad_name: String) -> int:
-	return (_goal_stack_by_name.get(squad_name, []) as Array).size()
-
-
-func _clear_goal_for_squad(squad_name: String) -> bool:
-	if not _goal_stack_by_name.has(squad_name):
-		return false
-	_goal_stack_by_name.erase(squad_name)
-	_refresh_selection_overlay()
-	return true
+func _find_squad(squad_name: String) -> SquadData:
+	for s in _squads:
+		if s.squad_name == squad_name:
+			return s
+	return null
 
 
 # ===== PUBLIC COMMAND API (UI/Debug Layer) =====
@@ -100,13 +65,20 @@ func issue_clear_goal(squad_name: String) -> bool:
 	for squad in _squads:
 		if squad.squad_name != squad_name:
 			continue
-		return _clear_goal_for_squad(squad.squad_name)
+		var had := squad.get_goal_stack_size() > 0
+		squad.clear_goal()
+		_refresh_selection_overlay()
+		return had
 	return false
 
 
 func issue_clear_all_goals() -> bool:
 	"""Public command: clear all squad goals."""
-	log_command("clear_all_goals", "count=%d" % _goal_stack_by_name.size())
+	var count := 0
+	for s in _squads:
+		if s.get_goal_stack_size() > 0:
+			count += 1
+	log_command("clear_all_goals", "count=%d" % count)
 	return request_clear_all_squad_goals()
 
 
@@ -193,9 +165,9 @@ func get_status_text() -> String:
 	var parts: Array[String] = []
 	for squad in _squads:
 		var part := String(squad.get_status_text())
-		var goal_id := _get_active_goal(squad.squad_name)
+		var goal_id := squad.get_active_goal()
 		if goal_id >= 0:
-			var stack_size: int = _get_goal_stack_size(squad.squad_name)
+			var stack_size: int = squad.get_goal_stack_size()
 			if stack_size > 1:
 				part += " -> goal:%s (+%d queued)" % [_format_location_ref(goal_id), stack_size - 1]
 			else:
@@ -217,13 +189,14 @@ func get_map_debug_text() -> String:
 
 	var current_id := int(selected_info.get("current_location_id", -1))
 	var target_id := int(selected_info.get("target_location_id", -1))
-	var goal_id := _get_active_goal(_selected_squad_name)
+	var _sel_squad := _find_squad(_selected_squad_name)
+	var goal_id := _sel_squad.get_active_goal() if _sel_squad != null else -1
 	var state_text := "moving" if int(selected_info.get("squad_state", 0)) == SquadData.STATE_MOVING else "rest"
 	var current_ref := _format_location_ref(current_id)
 	var target_ref := _format_location_ref(target_id)
 
 	if goal_id >= 0:
-		var stack_size: int = _get_goal_stack_size(_selected_squad_name)
+		var stack_size: int = _sel_squad.get_goal_stack_size() if _sel_squad != null else 0
 		var goal_ref := _format_location_ref(goal_id)
 		if stack_size > 1:
 			goal_ref += "(+%d)" % (stack_size - 1)
@@ -260,7 +233,7 @@ func request_return_home_for_squad(squad_name: String) -> bool:
 			continue
 		if squad.current_location_id == squad.home_location_id:
 			return false
-		_push_low_priority_goal(squad.squad_name, squad.home_location_id)
+		squad.push_low_priority_goal(squad.home_location_id)
 		if squad.squad_state != SquadData.STATE_MOVING:
 			_begin_move(squad)
 		return true
@@ -277,7 +250,7 @@ func request_move_all_squads_to_location(goal_location_id: int) -> bool:
 
 	var changed := false
 	for squad in _squads:
-		_set_explicit_goal(squad.squad_name, goal_location_id)
+		squad.set_explicit_goal(goal_location_id)
 		if squad.squad_state != SquadData.STATE_MOVING:
 			_begin_move(squad)
 		changed = true
@@ -306,13 +279,23 @@ func request_move_selected_squad_to_location_key(goal_location_key: String) -> b
 func request_clear_selected_squad_goal() -> bool:
 	if _selected_squad_name.is_empty():
 		return false
-	return _clear_goal_for_squad(_selected_squad_name)
+	var sel := _find_squad(_selected_squad_name)
+	if sel == null:
+		return false
+	var had := sel.get_goal_stack_size() > 0
+	sel.clear_goal()
+	_refresh_selection_overlay()
+	return had
 
 
 func request_clear_all_squad_goals() -> bool:
-	if _goal_stack_by_name.is_empty():
+	var had_goals := false
+	for s in _squads:
+		if s.get_goal_stack_size() > 0:
+			had_goals = true
+			s.clear_goal()
+	if not had_goals:
 		return false
-	_goal_stack_by_name.clear()
 	_refresh_selection_overlay()
 	return true
 
@@ -327,7 +310,7 @@ func request_move_squad_to_location(squad_name: String, goal_location_id: int) -
 	for squad in _squads:
 		if squad.squad_name != squad_name:
 			continue
-		_set_explicit_goal(squad.squad_name, goal_location_id)
+		squad.set_explicit_goal(goal_location_id)
 		if squad.squad_state != SquadData.STATE_MOVING:
 			_begin_move(squad)
 		_refresh_selection_overlay()
@@ -366,7 +349,6 @@ func _rebuild() -> void:
 	_squads.clear()
 	_visuals.clear()
 	_sim_ttl_by_name.clear()
-	_goal_stack_by_name.clear()
 	_selected_squad_name = ""
 	if _root != null and is_instance_valid(_root):
 		_root.queue_free()
@@ -478,10 +460,10 @@ func _begin_move(squad: SquadData) -> void:
 		return
 
 	var target_id: int = -1
-	var goal_id: int = _get_active_goal(squad.squad_name)
+	var goal_id: int = squad.get_active_goal()
 	if goal_id >= 0:
 		if current_id == goal_id:
-			var next_goal := _pop_goal_and_get_next(squad.squad_name)
+			var next_goal := squad.pop_goal_and_get_next()
 			if next_goal >= 0:
 				# Chain to next goal in stack without resting.
 				goal_id = next_goal
@@ -496,7 +478,7 @@ func _begin_move(squad: SquadData) -> void:
 			# No path to goal — pop it to avoid infinite stall, fall through to wander.
 			push_warning("SquadManager: no path from %s to goal %s for squad '%s', dropping goal" % [
 				_format_location_ref(current_id), _format_location_ref(goal_id), squad.squad_name])
-			_pop_goal_and_get_next(squad.squad_name)
+			squad.pop_goal_and_get_next()
 
 	if target_id < 0:
 		var forced_target_id: int = int(_forced_next_target_by_name.get(squad.squad_name, -1))
@@ -645,7 +627,8 @@ func _refresh_selection_overlay() -> void:
 	_selection_marker.visible = true
 	_selection_marker.position = squad_pos + Vector3(0, 0.06, 0)
 
-	var goal_id := _get_active_goal(_selected_squad_name)
+	var _sel_s := _find_squad(_selected_squad_name)
+	var goal_id := _sel_s.get_active_goal() if _sel_s != null else -1
 	if goal_id < 0 or _zone_manager == null:
 		_goal_marker.visible = false
 		_clear_route_visuals()
