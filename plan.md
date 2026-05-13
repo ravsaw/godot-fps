@@ -198,6 +198,30 @@
 - Co najmniej 3 consequence handlery działają w runtime na realnych zdarzeniach.
 - Po Dniu 10 wszystkie exit criteria Sprintu 2 są spełnione.
 
+### Następne TODO (kolejność wykonania)
+
+1. EventBus MVP skeleton w GDScript (`publish`, `subscribe`, `drain`).
+  Verify: pojedynczy testowy event przechodzi pełny cykl i jest widoczny w logu.
+2. Kontrakt `CauseType` + payload (`schema_version`, `cause_id`, `source`, `location_key`).
+  Verify: walidator odrzuca payload bez wymaganych pól z czytelnym warningiem.
+3. Integracja EventBus z tickiem ALife (budżet per tick + odłożone eventy).
+  Verify: burst eventów nie blokuje ticka; nadmiar przechodzi na kolejny tick.
+4. `ConsequenceRegistry` (mapowanie `CauseType -> handler`).
+  Verify: brak handlera nie crashuje runtime, tylko loguje odrzucenie.
+5. Handler `investigate` (minimalna selekcja najbliższego squadu).
+  Verify: po cause typu alert jeden squad dostaje rozkaz ruchu przez public API.
+6. Handler `retaliate` + prosty cooldown antyspam.
+  Verify: ten sam squad nie dostaje seryjnie identycznej akcji co tick.
+7. Publikacja 3 pierwszych cause'ów z runtime: `DEATH`, `WOUND`, `SQUAD_ARRIVE`.
+  Verify: każde zdarzenie emituje dokładnie jeden event z poprawnym payloadem.
+8. Telemetria łańcucha decyzji (`cause -> handler -> action -> outcome`).
+  Verify: w logu da się prześledzić pełny przebieg pojedynczego przypadku.
+
+### Stop Condition (na koniec tej paczki)
+- Headless smoke przechodzi po każdym większym kroku.
+- Brak nowych błędów parsera w skryptach EventBus/ALife.
+- Co najmniej 1 emergentny scenariusz działa bez ręcznego skryptowania.
+
 ---
 
 ## Dalsze priorytety (po Sprint 2)
