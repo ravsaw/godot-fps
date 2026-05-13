@@ -5,6 +5,12 @@ const CAUSE_ANY: StringName = &"*"
 
 var _queue: Array[Dictionary] = []
 var _subscribers_by_cause: Dictionary = {}
+var _telemetry: Dictionary = {
+	"published": 0,
+	"processed": 0,
+	"deferred": 0,
+	"rejected": 0,
+}
 
 
 func subscribe(cause_type: StringName, handler: Callable) -> void:
@@ -18,15 +24,19 @@ func subscribe(cause_type: StringName, handler: Callable) -> void:
 
 func publish(event_data: Dictionary) -> bool:
 	if not _validate_event_payload(event_data):
+		_telemetry["rejected"] += 1
 		return false
 	_queue.append(event_data.duplicate(true))
+	_telemetry["published"] += 1
 	return true
 
 
 func drain(max_events: int) -> Dictionary:
 	var budget: int = max(0, max_events)
 	if budget <= 0 or _queue.is_empty():
-		return {"processed": 0, "deferred": _queue.size()}
+		var deferred_count: int = _queue.size()
+		_telemetry["deferred"] = deferred_count
+		return {"processed": 0, "deferred": deferred_count}
 
 	var processed: int = 0
 	while processed < budget and not _queue.is_empty():
@@ -34,11 +44,31 @@ func drain(max_events: int) -> Dictionary:
 		_dispatch_event(event_data)
 		processed += 1
 
-	return {"processed": processed, "deferred": _queue.size()}
+	_telemetry["processed"] += processed
+	_telemetry["deferred"] = _queue.size()
+	return {"processed": processed, "deferred": _queue.size(), "total_published": _telemetry["published"], "total_rejected": _telemetry["rejected"]}
 
 
 func pending_count() -> int:
 	return _queue.size()
+
+
+func get_telemetry() -> Dictionary:
+	return {
+		"published": _telemetry["published"],
+		"processed": _telemetry["processed"],
+		"deferred": _telemetry["deferred"],
+		"rejected": _telemetry["rejected"],
+	}
+
+
+func reset_telemetry() -> void:
+	_telemetry = {
+		"published": 0,
+		"processed": 0,
+		"deferred": 0,
+		"rejected": 0,
+	}
 
 
 func _dispatch_event(event_data: Dictionary) -> void:

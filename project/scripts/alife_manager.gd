@@ -210,9 +210,15 @@ func _drain_event_bus() -> void:
 	if _event_bus == null:
 		return
 	var result: Dictionary = _event_bus.drain(_EVENT_BUDGET_PER_TICK)
+	var processed: int = int(result.get("processed", 0))
 	var deferred: int = int(result.get("deferred", 0))
+	var total_pub: int = int(result.get("total_published", 0))
+	var total_rej: int = int(result.get("total_rejected", 0))
+	
 	if deferred > 0:
-		emit_signal("strategic_tick", "ALifeEventBus: deferred=%d budget=%d" % [deferred, _EVENT_BUDGET_PER_TICK])
+		emit_signal("strategic_tick", "ALifeEventBus: processed=%d deferred=%d budget=%d" % [processed, deferred, _EVENT_BUDGET_PER_TICK])
+	if total_rej > 0:
+		emit_signal("strategic_tick", "ALifeEventBus: rejected=%d (invalid payload)" % total_rej)
 
 
 func _on_event_trace(event_data: Dictionary) -> void:
