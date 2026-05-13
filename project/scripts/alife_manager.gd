@@ -126,4 +126,14 @@ func _apply_location_ownership_from_presence(location_presence: Dictionary) -> v
 			continue
 
 		location.faction_owner_id = best_faction_id
-		emit_signal("strategic_tick", "Loc %d captured by %s" % [location_id, _zone_manager.get_faction_name(best_faction_id)])
+		emit_signal("strategic_tick", "Loc %s captured by %s" % [_format_location_ref(location_id), _zone_manager.get_faction_name(best_faction_id)])
+
+
+func _format_location_ref(location_id: int) -> String:
+	if location_id < 0:
+		return "n/a"
+	if _zone_manager != null and _zone_manager.has_method("get_location_key_for_graph_id"):
+		var key := String(_zone_manager.get_location_key_for_graph_id(location_id))
+		if not key.is_empty():
+			return key
+	return str(location_id)

@@ -372,12 +372,22 @@ func _rebuild_world_graph() -> void:
 		var from_zone: StringName = conn.get("from_zone", &"")
 		var to_zone: StringName = conn.get("to_zone", &"")
 		if from_zone == &"" or to_zone == &"":
+			push_warning("ZoneManager: skipped malformed zone connection (missing from_zone/to_zone)")
 			continue
 		var from_local_id := int(conn.get("from_location_id", -1))
 		if from_local_id < 0:
+			push_warning("ZoneManager: skipped connection %s->%s with invalid from_location_id=%d" % [String(from_zone), String(to_zone), from_local_id])
 			continue
+		if not _zone_has_local_location_id(from_zone, from_local_id):
+			push_warning("ZoneManager: skipped connection %s->%s because source location key %s does not exist" % [String(from_zone), String(to_zone), compose_location_key(from_zone, from_local_id)])
+			continue
+
 		var to_local_id := _resolve_gate_id_for_transition_target(from_zone, to_zone)
 		if to_local_id < 0:
+			push_warning("ZoneManager: skipped connection %s->%s because target gate location could not be resolved" % [String(from_zone), String(to_zone)])
+			continue
+		if not _zone_has_local_location_id(to_zone, to_local_id):
+			push_warning("ZoneManager: skipped connection %s->%s because target location key %s does not exist" % [String(from_zone), String(to_zone), compose_location_key(to_zone, to_local_id)])
 			continue
 
 		var from_graph_id := _to_graph_location_id(from_zone, from_local_id)
@@ -385,12 +395,25 @@ func _rebuild_world_graph() -> void:
 		var from_loc: SmartLocation = graph_by_id.get(from_graph_id, null)
 		var to_loc: SmartLocation = graph_by_id.get(to_graph_id, null)
 		if from_loc == null or to_loc == null:
+			push_warning("ZoneManager: skipped connection %s->%s because graph node is missing (%d -> %d)" % [String(from_zone), String(to_zone), from_graph_id, to_graph_id])
 			continue
 		_append_neighbor_if_missing(from_loc, to_graph_id)
 		_append_neighbor_if_missing(to_loc, from_graph_id)
 
 	_world_graph.set_locations(graph_locations)
 	_report_world_graph_validation(_validate_world_graph())
+
+
+func _zone_has_local_location_id(zone_id: StringName, local_location_id: int) -> bool:
+	if local_location_id < 0:
+		return false
+	if not _zone_locations_by_id.has(zone_id):
+		return false
+	var zone_locations: Array[SmartLocation] = _zone_locations_by_id[zone_id]
+	for loc in zone_locations:
+		if loc != null and loc.location_id == local_location_id:
+			return true
+	return false
 
 
 func _resolve_gate_id_for_transition_target(from_zone_id: StringName, to_zone_id: StringName) -> int:

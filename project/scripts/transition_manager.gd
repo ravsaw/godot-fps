@@ -7,12 +7,16 @@ class_name TransitionManager
 
 const _CHECK_INTERVAL: float = 0.5
 const _PLAYER_RADIUS: float = 30.0
+const _MAX_SPAWNS_PER_TICK: int = 3  # Budget: max proxies to create per check interval
+const _POSITION_SYNC_EVERY_N_TICKS: int = 2  # Sync position every N checks (not every tick)
 
 var _player: Variant = null
 var _squad_manager: Variant = null
 var _scene_root: Node3D = null
 var _check_ttl: float = 0.0
+var _tick_counter: int = 0
 var _spawned: Dictionary = {}  # squad_name -> NpcAgent3D node
+var _pending_spawn_queue: Array = []  # Array[String] of squad names awaiting spawn
 
 
 func setup(player: Variant, squad_manager: Variant, scene_root: Node3D) -> void:
@@ -33,37 +37,80 @@ func _process(delta: float) -> void:
 	_tick_transitions()
 
 
+func _is_within_player_radius(player_pos: Vector3, squad_pos: Vector3) -> bool:
+	return player_pos.distance_to(squad_pos) <= _PLAYER_RADIUS
+
+
+func _sync_spawned_proxy_position(squad_name: String, squad_pos: Vector3) -> void:
+	var node: Variant = _spawned.get(squad_name)
+	if node != null and is_instance_valid(node):
+		node.position = squad_pos
+
+
 func _tick_transitions() -> void:
 	if _player == null or _squad_manager == null:
 		return
 	if not is_instance_valid(_player):
 		return
 
+	_tick_counter += 1
+	var should_sync_positions: bool = (_tick_counter % _POSITION_SYNC_EVERY_N_TICKS) == 0
+
 	var player_pos: Vector3 = _player.global_position
 	var snapshot: Array[Dictionary] = _squad_manager.get_snapshot()
 	var live_names: Dictionary = {}
+	var info_by_name: Dictionary = {}
 
+	# First pass: identify who should be active, collect spawn candidates
 	for info in snapshot:
 		var squad_name: String = String(info.get("name", ""))
 		if squad_name.is_empty():
 			continue
 		live_names[squad_name] = true
+		info_by_name[squad_name] = info
 
 		var squad_pos: Vector3 = info.get("position", Vector3.ZERO)
-		var dist: float = player_pos.distance_to(squad_pos)
+		var is_in_radius: bool = _is_within_player_radius(player_pos, squad_pos)
 		var is_spawned: bool = _spawned.has(squad_name)
+		var is_pending: bool = _pending_spawn_queue.has(squad_name)
 
-		if dist <= _PLAYER_RADIUS and not is_spawned:
-			_spawn_proxy(squad_name, squad_pos, info)
-		elif dist > _PLAYER_RADIUS and is_spawned:
+		if is_in_radius and not is_spawned and not is_pending:
+			# Queue for spawn (respects budget)
+			_pending_spawn_queue.append(squad_name)
+
+		if not is_in_radius and is_spawned:
 			_despawn_proxy(squad_name)
-		elif is_spawned:
-			# Keep proxy position in sync with ALife simulation
-			var node: Variant = _spawned.get(squad_name)
-			if node != null and is_instance_valid(node):
-				node.position = squad_pos
+		elif is_spawned and should_sync_positions:
+			# Throttled position sync for already spawned proxies
+			_sync_spawned_proxy_position(squad_name, squad_pos)
 
-	# Remove proxies for squads that no longer exist in the simulation
+	# Second pass: process spawn budget (max _MAX_SPAWNS_PER_TICK)
+	var spawns_this_tick: int = 0
+	var remaining_pending: Array = []
+	for squad_name in _pending_spawn_queue:
+		# Drop stale entries that no longer exist in simulation.
+		if not live_names.has(squad_name):
+			continue
+
+		var squad_info: Dictionary = info_by_name.get(squad_name, {})
+		if squad_info.is_empty():
+			continue
+
+		# Re-check distance before spawning, otherwise an old queued squad could spawn late.
+		var squad_pos: Vector3 = squad_info.get("position", Vector3.ZERO)
+		if not _is_within_player_radius(player_pos, squad_pos):
+			continue
+
+		if spawns_this_tick >= _MAX_SPAWNS_PER_TICK:
+			# Save for next tick
+			remaining_pending.append(squad_name)
+			continue
+
+		_spawn_proxy(squad_name, squad_pos, squad_info)
+		spawns_this_tick += 1
+	_pending_spawn_queue = remaining_pending
+
+	# Third pass: cleanup orphaned proxies
 	for spawned_name in _spawned.keys():
 		if not live_names.has(spawned_name):
 			_despawn_proxy(spawned_name)
@@ -116,6 +163,8 @@ func _despawn_proxy(squad_name: String) -> void:
 	if node != null and is_instance_valid(node):
 		node.queue_free()
 	_spawned.erase(squad_name)
+	# Also remove from pending queue if it was there
+	_pending_spawn_queue.erase(squad_name)
 
 
 func _faction_color(faction_id: int) -> Color:
