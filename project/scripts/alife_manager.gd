@@ -4,6 +4,7 @@ class_name AlifeManager
 signal strategic_tick(summary: String)
 
 const ALIFE_EVENT_BUS_SCRIPT := preload("res://scripts/alife_event_bus.gd")
+const ALIFE_CONSEQUENCE_REGISTRY_SCRIPT := preload("res://scripts/alife_consequence_registry.gd")
 const _EVENT_SCHEMA_VERSION: int = 1
 const _EVENT_BUDGET_PER_TICK: int = 6
 const _CAUSE_LOCATION_CAPTURED: StringName = &"LOCATION_CAPTURED"
@@ -20,6 +21,7 @@ var _last_dominant_faction: String = "Neutral"
 var _away_ticks_by_name: Dictionary = {}
 var _return_home_threshold: int = 4
 var _event_bus: Variant = null
+var _consequence_registry: Variant = null
 var _event_id_seq: int = 0
 
 
@@ -29,6 +31,12 @@ func setup(zone_manager: Variant, squad_manager: Variant) -> void:
 	if _event_bus == null:
 		_event_bus = ALIFE_EVENT_BUS_SCRIPT.new()
 		_event_bus.subscribe(&"*", Callable(self, "_on_event_trace"))
+	if _consequence_registry == null:
+		_consequence_registry = ALIFE_CONSEQUENCE_REGISTRY_SCRIPT.new()
+		_consequence_registry.setup(Callable(self, "_emit_consequence_log"))
+		_consequence_registry.register_handler(_CAUSE_LOCATION_CAPTURED, Callable(self, "_handle_consequence_investigate"))
+	if _event_bus != null and _consequence_registry != null:
+		_event_bus.subscribe(&"*", Callable(_consequence_registry, "handle_event"))
 
 
 func get_debug_text() -> String:
@@ -187,6 +195,66 @@ func _on_event_trace(event_data: Dictionary) -> void:
 	var location_key := String(event_data.get("location_key", "n/a"))
 	var cause_id := String(event_data.get("cause_id", "n/a"))
 	emit_signal("strategic_tick", "ALifeEvent: %s @%s [%s]" % [cause_type, location_key, cause_id])
+
+
+func _emit_consequence_log(message: String) -> void:
+	emit_signal("strategic_tick", message)
+
+
+func _handle_consequence_investigate(event_data: Dictionary) -> Dictionary:
+	if _zone_manager == null or _squad_manager == null:
+		return {"action": "investigate", "outcome": "skipped:no_runtime_context"}
+
+	var location_key := String(event_data.get("location_key", ""))
+	if location_key.is_empty() or location_key == "n/a":
+		return {"action": "investigate", "outcome": "skipped:invalid_location_key"}
+
+	var target_location_id: int = int(_zone_manager.get_graph_location_id_from_key(location_key))
+	if target_location_id < 0:
+		return {"action": "investigate", "outcome": "skipped:unknown_location"}
+
+	var world_graph: Variant = _zone_manager.get_world_graph()
+	if world_graph == null:
+		return {"action": "investigate", "outcome": "skipped:missing_world_graph"}
+	var target_location: Variant = world_graph.get_location(target_location_id)
+	if target_location == null:
+		return {"action": "investigate", "outcome": "skipped:missing_target_location"}
+
+	var payload: Dictionary = event_data.get("payload", {})
+	var captured_by_faction: int = int(payload.get("faction_id", -1))
+	var target_pos: Vector3 = target_location.world_position
+
+	var best_squad_name: String = ""
+	var best_distance: float = INF
+	var snapshot: Array[Dictionary] = _squad_manager.get_snapshot()
+	for squad_info in snapshot:
+		var squad_name: String = String(squad_info.get("name", ""))
+		if squad_name.is_empty():
+			continue
+		var squad_faction_id: int = int(squad_info.get("faction_id", -1))
+		if captured_by_faction >= 0 and squad_faction_id == captured_by_faction:
+			continue
+		if int(squad_info.get("squad_state", 0)) == SquadData.STATE_MOVING:
+			continue
+
+		var squad_pos: Vector3 = squad_info.get("position", Vector3.ZERO)
+		var dist: float = squad_pos.distance_to(target_pos)
+		if dist < best_distance:
+			best_distance = dist
+			best_squad_name = squad_name
+
+	if best_squad_name.is_empty():
+		return {"action": "investigate", "outcome": "skipped:no_candidate"}
+
+	if not _squad_manager.issue_move_squad(best_squad_name, location_key):
+		return {"action": "investigate", "outcome": "failed:issue_move"}
+
+	return {
+		"action": "investigate",
+		"outcome": "issued",
+		"squad": best_squad_name,
+		"location": location_key,
+	}
 
 
 func _format_location_ref(location_id: int) -> String:
