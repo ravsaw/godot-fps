@@ -58,6 +58,17 @@
 
 #### Sprint 1 — Backlog dzienny (10 dni roboczych)
 
+#### Sprint 1 — Postęp wykonania (aktualizacja)
+- Day 1 ✅: Format `zone_id:local_id` używany konsekwentnie. Helpery parse/compose/get_graph_id w ZoneManager. ALife i Squad używają `_format_location_ref()`.
+- Day 2-3 ✅: `_validate_world_graph()` + `_report_world_graph_validation()` — orphan/missing/one-way/bad-cost, fail-fast assert w debug, uruchamiane przy każdym przebudowaniu grafu.
+- Day 4 ✅: Goal stack w `SquadManager` (`_goal_stack_by_name: Dictionary`). Helpery `_get_active_goal`, `_set_explicit_goal`, `_push_low_priority_goal`, `_pop_goal_and_get_next`. Priorytet: explicit order > return_home.
+- Day 5 ✅: Fallback przy braku ścieżki (pop goal + warning, nie blokuje squadu). Głębokość stosu w status i map debug text (`goal:X (+N queued)`).
+- Day 6 ✅: Publiczny command API w `SquadManager` (`issue_move_squad`, `issue_move_all_squads`, `issue_select_squad`, `issue_select_next_squad`, `issue_clear_goal`, `issue_clear_all_goals`, `query_selected_squad`, `query_squad_near`).
+- Day 7 ✅: `main.gd` używa API komend (UI -> API), bez bezpośredniego dostępu do detali runtime squadów.
+- Day 8 ✅: `TransitionManager` ma budżet aktywacji (`_MAX_SPAWNS_PER_TICK`), kolejkę pending spawnów i throttling synchronizacji pozycji (`_POSITION_SYNC_EVERY_N_TICKS`).
+- Day 9 ✅: Usunięty hotspot O(n^2) przy spawnach (indeks `info_by_name`) oraz guard przed spóźnionym spawnem poza zasięgiem.
+- Weryfikacja: headless smoke test przechodzi, walidacja grafu raportuje stan OK (33 nodes, 0 bad_cost).
+
 **Dzień 1 — Kontrakt ID lokacji**
 - Zdefiniować jeden format ID (`zone_id:local_id`) i helpery parse/compose.
 - Przepiąć miejsca, gdzie nadal używane są lokalne ID bez prefiksu strefy.
