@@ -5,6 +5,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/variant.hpp>
 #include <godot_cpp/variant/vector3.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 
 namespace godot {
 
@@ -16,6 +17,11 @@ public:
         STATE_IDLE = 0,
         STATE_MOVING = 1,
         STATE_RESTING = 2,
+    };
+
+    enum FormationType {
+        FORMATION_REST_SCATTERED = 0,
+        FORMATION_MARCH_TIGHT = 1,
     };
 
 private:
@@ -31,6 +37,10 @@ private:
     int64_t route_step = 0;
     Vector3 from_position;
     Vector3 to_position;
+    int64_t formation_type = FORMATION_MARCH_TIGHT;
+    bool arrived_this_frame = false;
+    Vector3 computed_position;
+    TypedArray<Vector3> formation_positions;
 
 protected:
     static void _bind_methods();
@@ -74,10 +84,20 @@ public:
 
     bool is_traveling() const;
     String get_status_text() const;
+
+    // Movement & Formation simulation (Phase 1 C++ migration)
+    void tick_movement(double delta);
+    void compute_formation_positions();
+    TypedArray<Vector3> get_formation_positions() const;
+    void set_formation_type(int64_t p_type);
+    int64_t get_formation_type() const;
+    bool get_arrived_this_frame() const;
+    Vector3 get_computed_position() const;
 };
 
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::SquadData::SquadState);
+VARIANT_ENUM_CAST(godot::SquadData::FormationType);
 
 #endif

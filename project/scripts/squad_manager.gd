@@ -19,6 +19,10 @@ var _selection_marker: MeshInstance3D = null
 var _goal_marker: MeshInstance3D = null
 var _route_root: Node3D = null
 
+const MIN_SQUAD_NPC_COUNT: int = 3
+const MAX_SQUAD_NPC_COUNT: int = 5
+const FORMATION_SPACING: float = 1.0
+
 const FULL_SIM_INTERVAL: float = 0.0
 const ADJACENT_SIM_INTERVAL: float = 0.15
 const FAR_SIM_INTERVAL: float = 0.55
@@ -397,6 +401,7 @@ func _create_squad(squad_name: String, faction_id: int, start_location_id: int, 
 	var squad := SquadData.new()
 	squad.squad_name = squad_name
 	squad.faction_id = faction_id
+	squad.npc_count = randi_range(MIN_SQUAD_NPC_COUNT, MAX_SQUAD_NPC_COUNT)
 	squad.current_location_id = start_location_id
 	squad.home_location_id = start_location_id
 	squad.squad_state = SquadData.STATE_IDLE
@@ -407,26 +412,51 @@ func _create_squad(squad_name: String, faction_id: int, start_location_id: int, 
 	squad.from_position = Vector3.ZERO
 	squad.to_position = Vector3.ZERO
 
-	var squad_node := MeshInstance3D.new()
-	squad_node.name = squad_name.replace(" ", "")
-	var mesh := CapsuleMesh.new()
-	mesh.radius = 0.22
-	mesh.height = 0.45
-	squad_node.mesh = mesh
-
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.emission = color * 0.18
-	squad_node.material_override = mat
-	_root.add_child(squad_node)
+	var visuals := _create_squad_visuals(squad_name, color, int(squad.npc_count))
+	_root.add_child(visuals.get("leader", null))
+	for member_node in visuals.get("members", []):
+		_root.add_child(member_node)
 
 	var label := Label3D.new()
 	label.text = squad_name
 	label.modulate = Color(1, 1, 1, 0.95)
 	_root.add_child(label)
 
-	_visuals[squad_name] = {"node": squad_node, "label": label}
+	visuals["label"] = label
+	visuals["npc_count"] = int(squad.npc_count)
+	_visuals[squad_name] = visuals
 	return squad
+
+
+func _create_squad_visuals(squad_name: String, color: Color, npc_count: int) -> Dictionary:
+	var leader := MeshInstance3D.new()
+	leader.name = squad_name.replace(" ", "")
+	var leader_mesh := CapsuleMesh.new()
+	leader_mesh.radius = 0.24
+	leader_mesh.height = 0.52
+	leader.mesh = leader_mesh
+
+	var leader_mat := StandardMaterial3D.new()
+	leader_mat.albedo_color = color
+	leader_mat.emission = color * 0.18
+	leader.material_override = leader_mat
+
+	var member_nodes: Array[Node3D] = []
+	for i in range(max(1, npc_count) - 1):
+		var member := MeshInstance3D.new()
+		member.name = "%s_Member%d" % [squad_name.replace(" ", ""), i + 1]
+		var member_mesh := CapsuleMesh.new()
+		member_mesh.radius = 0.18
+		member_mesh.height = 0.42
+		member.mesh = member_mesh
+
+		var member_mat := StandardMaterial3D.new()
+		member_mat.albedo_color = color.lerp(Color.WHITE, 0.2)
+		member_mat.emission = color * 0.08
+		member.material_override = member_mat
+		member_nodes.append(member)
+
+	return {"leader": leader, "members": member_nodes}
 
 
 func _begin_move(squad: SquadData) -> void:
@@ -491,10 +521,10 @@ func _begin_move(squad: SquadData) -> void:
 	squad.to_position = target_loc.world_position + Vector3(0, 0.45, 0)
 
 	var vis: Dictionary = _visuals.get(squad.squad_name, {})
-	var squad_node: Node3D = vis.get("node", null)
+	var squad_node: Node3D = vis.get("leader", null)
 	var label: Label3D = vis.get("label", null)
 	if squad_node != null:
-		squad_node.position = squad.from_position
+		_update_squad_formation_visuals(squad, vis)
 	if label != null:
 		label.position = squad.from_position + Vector3(0, 0.7, 0)
 		label.text = "%s\n%s -> %s" % [squad.squad_name, _format_location_ref(current_id), _format_location_ref(target_id)]
@@ -503,7 +533,7 @@ func _begin_move(squad: SquadData) -> void:
 
 func _tick_squad(squad: SquadData, delta: float) -> void:
 	var vis: Dictionary = _visuals.get(squad.squad_name, {})
-	var squad_node: Node3D = vis.get("node", null)
+	var squad_node: Node3D = vis.get("leader", null)
 	var label: Label3D = vis.get("label", null)
 	if squad_node == null or label == null or not is_instance_valid(squad_node) or not is_instance_valid(label):
 		return
@@ -513,15 +543,15 @@ func _tick_squad(squad: SquadData, delta: float) -> void:
 		_begin_move(squad)
 		return
 
-	var elapsed: float = float(squad.travel_elapsed) + delta
-	var duration: float = maxf(0.01, float(squad.travel_duration))
-	var t: float = clampf(elapsed / duration, 0.0, 1.0)
-	var current_pos: Vector3 = squad.from_position.lerp(squad.to_position, t)
-	squad_node.position = current_pos
-	label.position = current_pos + Vector3(0, 0.7, 0)
-	squad.travel_elapsed = elapsed
+	# Call C++ movement tick
+	squad.tick_movement(delta)
 
-	if t >= 1.0:
+	# Update visuals from C++ computed position
+	_update_squad_formation_visuals(squad, vis)
+	label.position = squad.get_computed_position() + Vector3(0, 0.7, 0)
+
+	# Check if arrived (computed in C++)
+	if squad.get_arrived_this_frame():
 		squad.current_location_id = target_id
 		squad.squad_state = SquadData.STATE_RESTING
 		squad.target_location_id = -1
@@ -533,7 +563,32 @@ func _tick_squad(squad: SquadData, delta: float) -> void:
 		if faction_name != "":
 			emit_signal("squad_event", "%s reached loc %s" % [faction_name, _format_location_ref(target_id)])
 	else:
-		label.text = "%s\nMoving %.0f%%" % [squad.squad_name, t * 100.0]
+		var t: float = maxf(0.0, float(squad.travel_elapsed) / maxf(0.01, float(squad.travel_duration)))
+		label.text = "%s\nMoving %.0f%%" % [squad.squad_name, clampf(t, 0.0, 1.0) * 100.0]
+
+
+func _update_squad_formation_visuals(squad: SquadData, vis: Dictionary) -> void:
+	var leader: Node3D = vis.get("leader", null)
+	if leader == null or not is_instance_valid(leader):
+		return
+
+	var members: Array = vis.get("members", [])
+
+	# Call C++ to compute formation positions
+	squad.compute_formation_positions()
+	var positions: Array[Vector3] = squad.get_formation_positions()
+
+	# Place leader at position[0]
+	if positions.size() > 0:
+		leader.position = positions[0]
+
+	# Place members at positions[1..]
+	for i in range(min(members.size(), positions.size() - 1)):
+		var member_node: Node3D = members[i]
+		if member_node == null or not is_instance_valid(member_node):
+			continue
+		member_node.position = positions[i + 1]
+
 
 
 func _find_next_hop_towards(world_graph: Variant, from_location_id: int, goal_location_id: int) -> int:

@@ -8,6 +8,8 @@ void SquadData::_bind_methods() {
     BIND_ENUM_CONSTANT(STATE_IDLE);
     BIND_ENUM_CONSTANT(STATE_MOVING);
     BIND_ENUM_CONSTANT(STATE_RESTING);
+    BIND_ENUM_CONSTANT(FORMATION_REST_SCATTERED);
+    BIND_ENUM_CONSTANT(FORMATION_MARCH_TIGHT);
 
     ClassDB::bind_method(D_METHOD("set_squad_name", "squad_name"), &SquadData::set_squad_name);
     ClassDB::bind_method(D_METHOD("get_squad_name"), &SquadData::get_squad_name);
@@ -33,6 +35,15 @@ void SquadData::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_to_position"), &SquadData::get_to_position);
     ClassDB::bind_method(D_METHOD("is_traveling"), &SquadData::is_traveling);
     ClassDB::bind_method(D_METHOD("get_status_text"), &SquadData::get_status_text);
+
+    // Phase 1 C++ migration methods
+    ClassDB::bind_method(D_METHOD("tick_movement", "delta"), &SquadData::tick_movement);
+    ClassDB::bind_method(D_METHOD("compute_formation_positions"), &SquadData::compute_formation_positions);
+    ClassDB::bind_method(D_METHOD("get_formation_positions"), &SquadData::get_formation_positions);
+    ClassDB::bind_method(D_METHOD("set_formation_type", "type"), &SquadData::set_formation_type);
+    ClassDB::bind_method(D_METHOD("get_formation_type"), &SquadData::get_formation_type);
+    ClassDB::bind_method(D_METHOD("get_arrived_this_frame"), &SquadData::get_arrived_this_frame);
+    ClassDB::bind_method(D_METHOD("get_computed_position"), &SquadData::get_computed_position);
 
     ADD_PROPERTY(PropertyInfo(Variant::STRING, "squad_name"), "set_squad_name", "get_squad_name");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "faction_id"), "set_faction_id", "get_faction_id");
@@ -154,4 +165,103 @@ String SquadData::get_status_text() const {
         return vformat("%s resting @%d", squad_name, current_location_id);
     }
     return vformat("%s idle @%d", squad_name, current_location_id);
+}
+
+// ============================================================================
+// Phase 1 C++ Migration: Movement & Formation Simulation
+// ============================================================================
+
+void SquadData::tick_movement(double delta) {
+    arrived_this_frame = false;
+
+    // Only tick if traveling
+    if (squad_state != STATE_MOVING) {
+        computed_position = from_position;
+        return;
+    }
+
+    // Accumulate travel time
+    travel_elapsed += delta;
+
+    // Calculate interpolation parameter t (0 to 1)
+    double t = travel_duration > 0.0 ? travel_elapsed / travel_duration : 1.0;
+    t = CLAMP(t, 0.0, 1.0);
+
+    // Interpolate position
+    computed_position = from_position.lerp(to_position, t);
+
+    // Check if arrived
+    if (t >= 1.0) {
+        arrived_this_frame = true;
+        computed_position = to_position;
+    }
+}
+
+void SquadData::compute_formation_positions() {
+    // Clear and pre-allocate formation positions array
+    formation_positions.clear();
+
+    // Ensure formation_positions can hold up to 5 vectors (leader + 4 members max)
+    for (int i = 0; i < 5; i++) {
+        formation_positions.append(Vector3());
+    }
+
+    // Calculate travel direction
+    Vector3 travel_dir = (to_position - from_position).normalized();
+    if (travel_dir.length_squared() < 0.0001f) {
+        travel_dir = Vector3(0, 0, 1); // Default forward if no movement
+    }
+
+    // Calculate right vector (perpendicular to travel direction)
+    Vector3 right = travel_dir.cross(Vector3(0, 1, 0)).normalized();
+    if (right.length_squared() < 0.0001f) {
+        right = Vector3(1, 0, 0); // Default right if travel is vertical
+    }
+
+    // Get formation offsets based on NPC count
+    const float member_offset = 1.2f; // Distance from leader
+    const float side_offset = 0.85f;
+    const float rear_offset = 0.8f;
+
+    // Place leader at computed position
+    Vector3 leader_pos = computed_position;
+    formation_positions[0] = leader_pos;
+
+    // Place members based on NPC count
+    if (npc_count >= 2) {
+        // Left member
+        formation_positions[1] = leader_pos + right * (-side_offset) + travel_dir * member_offset;
+    }
+    if (npc_count >= 3) {
+        // Right member
+        formation_positions[2] = leader_pos + right * side_offset + travel_dir * member_offset;
+    }
+    if (npc_count >= 4) {
+        // Rear member
+        formation_positions[3] = leader_pos + travel_dir * (member_offset * 2.0f);
+    }
+    if (npc_count >= 5) {
+        // Left-rear member
+        formation_positions[4] = leader_pos + right * (-0.55f) + travel_dir * (member_offset * 2.2f);
+    }
+}
+
+TypedArray<Vector3> SquadData::get_formation_positions() const {
+    return formation_positions;
+}
+
+void SquadData::set_formation_type(int64_t p_type) {
+    formation_type = p_type;
+}
+
+int64_t SquadData::get_formation_type() const {
+    return formation_type;
+}
+
+bool SquadData::get_arrived_this_frame() const {
+    return arrived_this_frame;
+}
+
+Vector3 SquadData::get_computed_position() const {
+    return computed_position;
 }
