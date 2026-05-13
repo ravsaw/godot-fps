@@ -42,6 +42,25 @@ func setup(zone_manager: Variant, squad_manager: Variant) -> void:
 		_event_bus.subscribe(&"*", Callable(_consequence_registry, "handle_event"))
 
 
+func publish_runtime_cause(cause_type: StringName, location_key: String, source: String, payload: Dictionary = {}) -> bool:
+	if _event_bus == null:
+		return false
+	if location_key.is_empty():
+		return false
+
+	_event_id_seq += 1
+	var event_data := {
+		"schema_version": _EVENT_SCHEMA_VERSION,
+		"cause_id": "runtime-%d-%d" % [_tick_index, _event_id_seq],
+		"cause_type": String(cause_type),
+		"source": source,
+		"location_key": location_key,
+		"tick": _tick_index,
+		"payload": payload.duplicate(true),
+	}
+	return _event_bus.publish(event_data)
+
+
 func get_debug_text() -> String:
 	return _last_summary
 

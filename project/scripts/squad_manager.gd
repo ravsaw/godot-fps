@@ -2,6 +2,7 @@ extends Node
 class_name SquadManager
 
 signal squad_event(message: String)
+signal squad_arrived(squad_name: String, location_key: String, faction_id: int)
 
 var _zone_manager: Variant = null
 var _scene_root: Node3D = null
@@ -528,6 +529,7 @@ func _tick_squad(squad: SquadData, delta: float) -> void:
 		if _zone_manager != null:
 			faction_name = _zone_manager.get_faction_name(squad.faction_id)
 		label.text = "%s\nAt %s" % [squad.squad_name, _format_location_ref(target_id)]
+		emit_signal("squad_arrived", squad.squad_name, _format_location_ref(target_id), squad.faction_id)
 		if faction_name != "":
 			emit_signal("squad_event", "%s reached loc %s" % [faction_name, _format_location_ref(target_id)])
 	else:

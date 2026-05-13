@@ -233,6 +233,7 @@ func _boot_npc_locations() -> void:
 	_squad_manager = SQUAD_MANAGER_SCRIPT.new()
 	add_child(_squad_manager)
 	_squad_manager.squad_event.connect(_show_event)
+	_squad_manager.squad_arrived.connect(_on_squad_arrived)
 	_squad_manager.setup(_zone_manager, self)
 
 	_alife_manager = ALIFE_MANAGER_SCRIPT.new()
@@ -537,6 +538,11 @@ func _on_player_died() -> void:
 func _on_npc_died(p_npc_id: int, p_source_id: int) -> void:
 	print("NPC died:", p_npc_id, "source:", p_source_id)
 	_show_event("NPC " + str(p_npc_id) + " down")
+	var death_loc_key: String = _resolve_location_key_from_world_pos(_player.global_position if _player != null and is_instance_valid(_player) else Vector3.ZERO)
+	_publish_runtime_cause(&"DEATH", death_loc_key, {
+		"npc_id": p_npc_id,
+		"source_id": p_source_id,
+	})
 	_npc = null
 	_npc_manager.clear_npc()
 	_npc_manager.schedule_respawn(3.0)
@@ -558,6 +564,40 @@ func _on_weapon_bullet_hit(hit_success: bool, target_id: int, _hit_position: Vec
 	if hit_success:
 		_show_event("Hit id=" + str(target_id))
 		_show_hitmarker()
+		var wound_loc_key: String = _resolve_location_key_from_world_pos(_hit_position)
+		_publish_runtime_cause(&"WOUND", wound_loc_key, {
+			"target_id": target_id,
+		})
+
+
+func _on_squad_arrived(squad_name: String, location_key: String, faction_id: int) -> void:
+	_publish_runtime_cause(&"SQUAD_ARRIVE", location_key, {
+		"squad_name": squad_name,
+		"faction_id": faction_id,
+	})
+
+
+func _publish_runtime_cause(cause_type: StringName, location_key: String, payload: Dictionary = {}) -> void:
+	if _alife_manager == null:
+		return
+	if not _alife_manager.has_method("publish_runtime_cause"):
+		return
+	if location_key.is_empty():
+		return
+	_alife_manager.call("publish_runtime_cause", cause_type, location_key, "main", payload)
+
+
+func _resolve_location_key_from_world_pos(world_pos: Vector3) -> String:
+	if _zone_manager == null:
+		return ""
+	if not _zone_manager.has_method("get_nearest_location"):
+		return ""
+	var nearest: SmartLocation = _zone_manager.get_nearest_location(world_pos)
+	if nearest == null:
+		return ""
+	if not _zone_manager.has_method("get_location_key_for_graph_id"):
+		return ""
+	return String(_zone_manager.get_location_key_for_graph_id(nearest.location_id))
 
 
 func _on_weapon_reloaded(new_mag: int, reserve: int) -> void:
