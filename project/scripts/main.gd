@@ -9,7 +9,7 @@ const TRANSITION_MANAGER_SCRIPT := preload("res://scripts/transition_manager.gd"
 const MAP_COMMAND_CONTROLLER_SCRIPT := preload("res://scripts/map_command_controller.gd")
 const DEBUG_OVERLAY_COMPOSER_SCRIPT := preload("res://scripts/debug_overlay_composer.gd")
 
-enum DebugMode { NONE = 0, NPC_PICKUPS = 1, NPC_LOCATIONS = 2, ZONE_TRANSITIONS = 3 }
+enum DebugMode { NONE = 0, NPC_PICKUPS = 1, NPC_LOCATIONS = 2, ZONE_TRANSITIONS = 3, EVENT_SYSTEM_TEST = 4 }
 
 var _debug_mode: DebugMode = DebugMode.NONE
 var _menu_layer: CanvasLayer = null
@@ -87,7 +87,9 @@ func _show_debug_menu() -> void:
 	add_child(_menu_layer)
 
 	var panel := PanelContainer.new()
-	panel.set_anchors_preset(Control.PRESET_CENTER)
+	panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	panel.offset_top = 10
+	panel.offset_left = 10
 	_menu_layer.add_child(panel)
 
 	var vbox := VBoxContainer.new()
@@ -122,6 +124,14 @@ func _show_debug_menu() -> void:
 		"3 — Przejścia między strefami",
 		"Gracz przy bramie strefy.\nDebug grafu, gate triggery, seamless\nprzejście zone_a ↔ zone_b.",
 		DebugMode.ZONE_TRANSITIONS
+	))
+
+	vbox.add_child(_make_separator())
+
+	vbox.add_child(_make_map_button(
+		"4 — Event System Test",
+		"Testowanie EventBus, konwencje przyczyn,\nhandlery konsekwencji, telemetria zdarzeń.",
+		DebugMode.EVENT_SYSTEM_TEST
 	))
 
 
@@ -168,6 +178,8 @@ func _on_map_selected(mode: DebugMode) -> void:
 			_boot_npc_locations()
 		DebugMode.ZONE_TRANSITIONS:
 			_boot_zone_transitions()
+		DebugMode.EVENT_SYSTEM_TEST:
+			_boot_event_system_test()
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +287,34 @@ func _boot_zone_transitions() -> void:
 	_show_event(">> Idź do SŁUPA [EDGE] na krawędzi regionu <<")
 	_show_event("Regiony tranzytowe mają własną podłogę")
 	_show_event("[F1] Powrót do menu")
+
+
+func _boot_event_system_test() -> void:
+	# Spawn player in zone_a
+	if _player != null and is_instance_valid(_player):
+		_player.position = Vector3(0, 2, 0)
+
+	# Setup world with zones and squads
+	_world_debug = WORLD_DEBUG_MANAGER_SCRIPT.new()
+	add_child(_world_debug)
+	_world_debug.setup(_zone_manager, self)
+	_world_debug.rebuild()
+
+	# Subscribe to ALife strategic tick for telemetry logging
+	if _alife_manager != null:
+		_alife_manager.strategic_tick.connect(_on_alife_telemetry)
+
+	_show_event("Map 4: Event System Test")
+	_show_event(">> EventBus, ConsequenceRegistry, Telemetry <<")
+	_show_event("Squady ALife generują zdarzenia DEATH, WOUND, itd.")
+	_show_event("Patrz console/debug HUD na telemetrii EventBus.")
+	_show_event("[F1] Powrót do menu")
+
+
+func _on_alife_telemetry(msg: String) -> void:
+	if msg.is_empty():
+		return
+	_show_event("[ALife] %s" % msg)
 
 
 # ---------------------------------------------------------------------------
