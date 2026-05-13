@@ -6,6 +6,8 @@ const SQUAD_MANAGER_SCRIPT := preload("res://scripts/squad_manager.gd")
 const ATTACHMENT_MANAGER_SCRIPT := preload("res://scripts/attachment_manager.gd")
 const ALIFE_MANAGER_SCRIPT := preload("res://scripts/alife_manager.gd")
 const TRANSITION_MANAGER_SCRIPT := preload("res://scripts/transition_manager.gd")
+const MAP_COMMAND_CONTROLLER_SCRIPT := preload("res://scripts/map_command_controller.gd")
+const DEBUG_OVERLAY_COMPOSER_SCRIPT := preload("res://scripts/debug_overlay_composer.gd")
 
 enum DebugMode { NONE = 0, NPC_PICKUPS = 1, NPC_LOCATIONS = 2, ZONE_TRANSITIONS = 3 }
 
@@ -21,8 +23,6 @@ var _respawn_ttl: float = -1.0
 var _zone_transition_cooldown: float = 0.0
 var _map_camera: Camera3D = null
 var _map_mode: bool = false
-var _map_dragging: bool = false
-var _map_drag_last_mouse_pos: Vector2 = Vector2.ZERO
 
 const MAP_ZOOM_STEP: float = 6.0
 const MAP_MIN_SIZE: float = 20.0
@@ -37,6 +37,8 @@ var _squad_manager: Variant = null
 var _attachment_manager: Variant = null
 var _alife_manager: Variant = null
 var _transition_manager: Variant = null
+var _map_command_controller: Variant = null
+var _debug_overlay_composer: Variant = null
 var _gate_beacon: Node3D = null
 var _transition_target_zone: StringName = &""
 var _transition_commit_trigger: Area3D = null
@@ -45,6 +47,7 @@ var _transition_from_gate_id: int = -1
 
 func _ready() -> void:
 	print("Main scene loaded")
+	_debug_overlay_composer = DEBUG_OVERLAY_COMPOSER_SCRIPT.new()
 
 	_npc_manager = NpcManager.new()
 	add_child(_npc_manager)
@@ -240,6 +243,8 @@ func _boot_npc_locations() -> void:
 	_transition_manager = TRANSITION_MANAGER_SCRIPT.new()
 	add_child(_transition_manager)
 	_transition_manager.setup(_player, _squad_manager, self)
+	if _map_command_controller != null:
+		_map_command_controller.update_context(_zone_manager, _squad_manager)
 
 	_show_event("Map 2: NPC + ALife Locations")
 
@@ -288,72 +293,56 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _map_mode and event is InputEventMouseMotion and _map_dragging:
-		_pan_map_camera(event.relative)
-		return
-
-	if event is InputEventMouseButton and _map_mode and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		_try_issue_map_move_order(event.position, event.shift_pressed)
-		return
-	if _map_mode and event is InputEventMouseButton:
-		match event.button_index:
-			MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE:
-				_map_dragging = event.pressed
-				_map_drag_last_mouse_pos = event.position
-				return
-			MOUSE_BUTTON_WHEEL_UP:
-				if event.pressed:
-					_set_map_zoom(_map_camera.size - MAP_ZOOM_STEP)
-				return
-			MOUSE_BUTTON_WHEEL_DOWN:
-				if event.pressed:
-					_set_map_zoom(_map_camera.size + MAP_ZOOM_STEP)
-				return
+	if _map_mode and _map_command_controller != null:
+		if _map_command_controller.handle_input(event):
+			return
 
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
 
-	if event.keycode == KEY_F1 and _debug_mode != DebugMode.NONE:
+	if _handle_global_key_input(event.keycode):
+		return
+
+	if _handle_attachment_menu_key(event.keycode):
+		return
+
+	_handle_loadout_key(event.keycode)
+
+
+func _handle_global_key_input(keycode: Key) -> bool:
+	if keycode == KEY_F1 and _debug_mode != DebugMode.NONE:
 		_teardown_world()
 		_show_debug_menu()
-		return
+		return true
 
-	if event.keycode == KEY_I:
+	if keycode == KEY_I:
 		_attachment_manager.toggle_menu()
 		_show_event("Attachment menu open" if _attachment_manager.is_menu_open() else "Attachment menu closed")
-		return
+		return true
 
-	if _attachment_manager.is_menu_open():
-		match event.keycode:
-			KEY_UP, KEY_W:
-				_attachment_manager.menu_navigate(-1)
-				return
-			KEY_DOWN, KEY_S:
-				_attachment_manager.menu_navigate(1)
-				return
-			KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
-				_attachment_manager.menu_confirm()
-				return
+	return false
 
-	if _map_mode:
-		match event.keycode:
-			KEY_TAB:
-				if _squad_manager != null:
-					var next_name: String = String(_squad_manager.select_next_squad())
-					if not next_name.is_empty():
-						_show_event("Selected squad: " + next_name)
-				return
-			KEY_C:
-				if _squad_manager != null:
-					if Input.is_key_pressed(KEY_SHIFT):
-						if _squad_manager.request_clear_all_squad_goals():
-							_show_event("Cleared goals for all squads")
-					else:
-						if _squad_manager.request_clear_selected_squad_goal():
-							_show_event("Cleared selected squad goal")
-				return
 
-	match event.keycode:
+func _handle_attachment_menu_key(keycode: Key) -> bool:
+	if not _attachment_manager.is_menu_open():
+		return false
+
+	match keycode:
+		KEY_UP, KEY_W:
+			_attachment_manager.menu_navigate(-1)
+			return true
+		KEY_DOWN, KEY_S:
+			_attachment_manager.menu_navigate(1)
+			return true
+		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+			_attachment_manager.menu_confirm()
+			return true
+
+	return false
+
+
+func _handle_loadout_key(keycode: Key) -> void:
+	match keycode:
 		KEY_1:
 			_attachment_manager.try_equip("ACOG Scope")
 		KEY_2:
@@ -389,6 +378,19 @@ func _setup_map_camera() -> void:
 	_map_camera.rotation_degrees = Vector3(-90, 0, 0)
 	add_child(_map_camera)
 
+	if _map_command_controller == null:
+		_map_command_controller = MAP_COMMAND_CONTROLLER_SCRIPT.new()
+		add_child(_map_command_controller)
+	_map_command_controller.setup(
+		_map_camera,
+		_zone_manager,
+		_squad_manager,
+		Callable(self, "_show_event"),
+		MAP_ZOOM_STEP,
+		MAP_MIN_SIZE,
+		MAP_MAX_SIZE
+	)
+
 
 func _toggle_map() -> void:
 	_map_mode = not _map_mode
@@ -404,19 +406,23 @@ func _toggle_map() -> void:
 		if player_cam != null:
 			player_cam.make_current()
 		_set_player_input_enabled(true)
-		_map_dragging = false
+		if _map_command_controller != null:
+			_map_command_controller.set_map_enabled(false)
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 		_show_event("[M] Map OFF")
 
 
-func _update_debug_hud(delta: float) -> void:
-	var hp_text := "HP: n/a"
+func _get_hp_snapshot() -> Dictionary:
 	var hp_value: float = 0.0
+	var hp_text: String = "HP: n/a"
 	if _player != null and _player.has_method("get_health"):
 		hp_value = float(_player.call("get_health"))
 		hp_text = "HP: " + str(hp_value)
+	return {"value": hp_value, "text": hp_text}
 
-	var ammo_text := "Ammo: n/a"
+
+func _get_ammo_snapshot() -> Dictionary:
+	var ammo_text: String = "Ammo: n/a"
 	var mag: int = 0
 	var reserve: int = 0
 	if _weapon != null:
@@ -425,48 +431,66 @@ func _update_debug_hud(delta: float) -> void:
 		if _weapon.has_method("get_ammo_reserve"):
 			reserve = int(_weapon.call("get_ammo_reserve"))
 		ammo_text = "Ammo: " + str(mag) + " / " + str(reserve)
+	return {"text": ammo_text, "mag": mag, "reserve": reserve}
 
+
+func _update_weapon_durability_hud() -> void:
 	if _weapon != null and _weapon.has_method("get_durability_percent"):
 		var durability: float = float(_weapon.call("get_durability_percent"))
 		if _hud != null and _hud.has_method("set_durability"):
 			_hud.call("set_durability", durability)
 
+
+func _get_npc_debug_text() -> String:
 	var npc_state_text := "n/a"
 	if _npc != null and is_instance_valid(_npc) and _npc.has_method("get_state"):
 		npc_state_text = str(int(_npc.call("get_state")))
 
-	var npc_debug_text := "NPC s=" + npc_state_text \
+	return "NPC s=" + npc_state_text \
 		+ " d=" + str(snappedf(_npc_manager._last_distance_to_player, 0.01)) \
 		+ " los=" + str(_npc_manager._last_los_ok) \
 		+ " block=" + _npc_manager._last_attack_block_reason
 
-	var world_debug_text := "World: n/a"
-	if _zone_manager != null and _player != null and is_instance_valid(_player):
-		world_debug_text = _zone_manager.get_zone_debug_text(_player.global_position)
-		if _squad_manager != null:
-			world_debug_text += "\n" + _squad_manager.get_status_text()
-		if _alife_manager != null:
-			world_debug_text += "\n" + _alife_manager.get_debug_text()
 
+func _apply_hud_snapshot(status_text: String, hp_value: float, mag: int, reserve: int, delta: float) -> void:
+	if _hud == null:
+		return
+	if _hud.has_method("set_status_text"):
+		_hud.call("set_status_text", status_text)
+	if _hud.has_method("set_hp"):
+		_hud.call("set_hp", hp_value)
+	if _hud.has_method("set_ammo"):
+		_hud.call("set_ammo", mag, reserve)
+	if _hud.has_method("tick"):
+		_hud.call("tick", delta)
+
+
+func _update_debug_hud(delta: float) -> void:
+	var hp_snapshot: Dictionary = _get_hp_snapshot()
+	var hp_text: String = String(hp_snapshot.get("text", "HP: n/a"))
+	var hp_value: float = float(hp_snapshot.get("value", 0.0))
+
+	var ammo_snapshot: Dictionary = _get_ammo_snapshot()
+	var ammo_text: String = String(ammo_snapshot.get("text", "Ammo: n/a"))
+	var mag: int = int(ammo_snapshot.get("mag", 0))
+	var reserve: int = int(ammo_snapshot.get("reserve", 0))
+
+	_update_weapon_durability_hud()
+	var npc_debug_text: String = _get_npc_debug_text()
+
+	var world_debug_text := "World: n/a"
 	var map_overlay_text := ""
-	if _map_mode:
-		var map_cmd_text := "MapCmd: n/a"
-		if _squad_manager != null and _squad_manager.has_method("get_map_debug_text"):
-			map_cmd_text = String(_squad_manager.call("get_map_debug_text"))
-		map_overlay_text = "\n" + map_cmd_text + "\nLegend: yellow ring=selected squad, orange orb=goal, orange line=route"
+	if _debug_overlay_composer != null:
+		world_debug_text = _debug_overlay_composer.compose_world_debug_text(_zone_manager, _player, _squad_manager, _alife_manager)
+		map_overlay_text = _debug_overlay_composer.compose_map_overlay_text(_map_mode, _squad_manager)
 
 	var view_mode_text := "View: MAP" if _map_mode else "View: FPS"
 	var controls_text := "Keys: M map, LMB select/assign, Shift+LMB all squads, Tab cycle squad, C clear goal, RMB/MMB drag, Wheel zoom | F1 menu"
 
-	if _hud != null:
-		if _hud.has_method("set_status_text"):
-			_hud.call("set_status_text", hp_text + "\n" + ammo_text + "\n" + view_mode_text + "\n" + npc_debug_text + "\n" + world_debug_text + map_overlay_text + "\nUse gate trigger to switch zone\n" + controls_text)
-		if _hud.has_method("set_hp"):
-			_hud.call("set_hp", hp_value)
-		if _hud.has_method("set_ammo"):
-			_hud.call("set_ammo", mag, reserve)
-		if _hud.has_method("tick"):
-			_hud.call("tick", delta)
+	var status_text: String = hp_text + "\n" + ammo_text + "\n" + view_mode_text + "\n" + npc_debug_text + "\n" + world_debug_text + map_overlay_text + "\nUse gate trigger to switch zone\n" + controls_text
+	if _debug_overlay_composer != null:
+		status_text = _debug_overlay_composer.compose_status_text(hp_text, ammo_text, view_mode_text, npc_debug_text, world_debug_text, map_overlay_text, controls_text)
+	_apply_hud_snapshot(status_text, hp_value, mag, reserve, delta)
 
 
 func _update_respawn_timers(delta: float) -> void:
@@ -629,7 +653,7 @@ func _zone_accent_color(zone_id: StringName) -> Color:
 func _teardown_world() -> void:
 	# Managers / overlays that are direct children of self
 	for node: Variant in [_world_debug, _squad_manager, _alife_manager,
-			_transition_manager, _attachment_manager, _hud]:
+			_transition_manager, _attachment_manager, _hud, _map_command_controller]:
 		if node != null and is_instance_valid(node):
 			node.queue_free()
 
@@ -657,6 +681,8 @@ func _teardown_world() -> void:
 	_attachment_manager = null
 	_alife_manager = null
 	_transition_manager = null
+	_map_command_controller = null
+	_debug_overlay_composer = null
 	_gate_beacon = null
 	_transition_commit_trigger = null
 	_transition_target_zone = &""
@@ -759,69 +785,6 @@ func _set_player_input_enabled(enabled: bool) -> void:
 		return
 	if _player.has_method("set_input_enabled"):
 		_player.call("set_input_enabled", enabled)
-
-
-func _set_map_zoom(new_size: float) -> void:
-	if _map_camera == null or not is_instance_valid(_map_camera):
-		return
-	_map_camera.size = clampf(new_size, MAP_MIN_SIZE, MAP_MAX_SIZE)
-
-
-func _pan_map_camera(relative: Vector2) -> void:
-	if _map_camera == null or not is_instance_valid(_map_camera):
-		return
-	var viewport_size := get_viewport().get_visible_rect().size
-	if viewport_size.x <= 0.0 or viewport_size.y <= 0.0:
-		return
-	var units_per_pixel := _map_camera.size / viewport_size.y
-	_map_camera.position.x -= relative.x * units_per_pixel
-	_map_camera.position.z -= relative.y * units_per_pixel
-
-
-func _try_issue_map_move_order(screen_pos: Vector2, all_squads: bool = false) -> void:
-	if _map_camera == null or not is_instance_valid(_map_camera):
-		return
-	if _zone_manager == null or _squad_manager == null:
-		return
-
-	var ray_origin: Vector3 = _map_camera.project_ray_origin(screen_pos)
-	var ray_dir: Vector3 = _map_camera.project_ray_normal(screen_pos)
-	if absf(ray_dir.y) < 0.0001:
-		return
-
-	var distance_to_ground := -ray_origin.y / ray_dir.y
-	if distance_to_ground < 0.0:
-		return
-	var world_pos := ray_origin + ray_dir * distance_to_ground
-
-	var squad_name: String = String(_squad_manager.get_nearest_squad_name(world_pos))
-	if not squad_name.is_empty():
-		if _squad_manager.select_squad(squad_name):
-			_show_event("Selected squad: " + squad_name)
-		return
-
-	var nearest: SmartLocation = _zone_manager.get_nearest_location(world_pos)
-	if nearest == null:
-		return
-	if nearest.world_position.distance_to(world_pos) > 4.5:
-		_show_event("Kliknij bliżej znacznika lokacji")
-		return
-	var location_key := String(_zone_manager.get_location_key_for_graph_id(nearest.location_id))
-	if location_key.is_empty():
-		return
-
-	if all_squads:
-		if _squad_manager.request_move_all_squads_to_location_key(location_key):
-			_show_event("All squads moving to %s" % location_key)
-		return
-
-	var selected_squad: String = String(_squad_manager.get_selected_squad_name())
-	if selected_squad.is_empty():
-		_show_event("Najpierw wybierz squad klikając jego znacznik")
-		return
-
-	if _squad_manager.request_move_selected_squad_to_location_key(location_key):
-		_show_event("%s moving to %s" % [selected_squad, location_key])
 
 
 func _spawn_transition_guide(from_zone_id: StringName, to_zone_id: StringName) -> void:
