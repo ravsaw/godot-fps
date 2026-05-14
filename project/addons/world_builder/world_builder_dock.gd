@@ -20,6 +20,13 @@ var _conn_gate_id: SpinBox
 # Edge editing state: -1 = none selected, otherwise index into _locations
 var _edge_from_idx: int = -1
 
+# Path point editing state
+var _selected_loc_idx: int = -1
+var _path_list: ItemList
+var _path_x: SpinBox
+var _path_y: SpinBox
+var _path_z: SpinBox
+
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(340, 400)
@@ -81,7 +88,72 @@ func _ready() -> void:
 	_list = ItemList.new()
 	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_list.custom_minimum_size = Vector2(0, 150)
+	_list.item_selected.connect(_on_location_selected)
 	add_child(_list)
+
+	# --- Path point editing ---
+	var path_label := Label.new()
+	path_label.text = "Path Points (select location above)"
+	add_child(path_label)
+
+	var path_input_row := HBoxContainer.new()
+	add_child(path_input_row)
+	var path_x_label := Label.new()
+	path_x_label.text = "X:"
+	path_x_label.custom_minimum_size = Vector2(30, 0)
+	path_input_row.add_child(path_x_label)
+	_path_x = SpinBox.new()
+	_path_x.min_value = -1000.0
+	_path_x.max_value = 1000.0
+	_path_x.step = 0.5
+	_path_x.value = 0.0
+	_path_x.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	path_input_row.add_child(_path_x)
+
+	var path_y_label := Label.new()
+	path_y_label.text = "Y:"
+	path_y_label.custom_minimum_size = Vector2(30, 0)
+	path_input_row.add_child(path_y_label)
+	_path_y = SpinBox.new()
+	_path_y.min_value = -1000.0
+	_path_y.max_value = 1000.0
+	_path_y.step = 0.5
+	_path_y.value = 0.0
+	_path_y.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	path_input_row.add_child(_path_y)
+
+	var path_z_label := Label.new()
+	path_z_label.text = "Z:"
+	path_z_label.custom_minimum_size = Vector2(30, 0)
+	path_input_row.add_child(path_z_label)
+	_path_z = SpinBox.new()
+	_path_z.min_value = -1000.0
+	_path_z.max_value = 1000.0
+	_path_z.step = 0.5
+	_path_z.value = 0.0
+	_path_z.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	path_input_row.add_child(_path_z)
+
+	var path_btn_row := HBoxContainer.new()
+	add_child(path_btn_row)
+	var path_add_btn := Button.new()
+	path_add_btn.text = "Add Point"
+	path_add_btn.pressed.connect(_add_path_point)
+	path_btn_row.add_child(path_add_btn)
+
+	var path_del_btn := Button.new()
+	path_del_btn.text = "Delete Selected"
+	path_del_btn.pressed.connect(_delete_selected_path_point)
+	path_btn_row.add_child(path_del_btn)
+
+	var path_clear_btn := Button.new()
+	path_clear_btn.text = "Clear All"
+	path_clear_btn.pressed.connect(_clear_path_points)
+	path_btn_row.add_child(path_clear_btn)
+
+	_path_list = ItemList.new()
+	_path_list.custom_minimum_size = Vector2(0, 60)
+	add_child(_path_list)
 
 	# --- Edge actions ---
 	var edge_label := Label.new()
@@ -430,6 +502,94 @@ func _clear_edges_on_selected() -> void:
 	_set_status("Cleared all edges on location id=%d" % id)
 
 
+# ---- Path point operations ---------------------------------------------
+
+func _on_location_selected(idx: int) -> void:
+	_selected_loc_idx = idx
+	_refresh_path_list()
+
+
+func _refresh_path_list() -> void:
+	if _path_list == null or _selected_loc_idx < 0 or _selected_loc_idx >= _locations.size():
+		_path_list.clear()
+		return
+
+	var loc := _locations[_selected_loc_idx]
+	if loc == null:
+		_path_list.clear()
+		return
+
+	_path_list.clear()
+	for i in range(loc.path_points.size()):
+		var pt := loc.path_points[i]
+		var text := "[%d] (%.1f, %.1f, %.1f)" % [i, pt.x, pt.y, pt.z]
+		_path_list.add_item(text)
+
+	if loc.path_points.is_empty():
+		_set_status("Location id=%d has no path points" % loc.location_id)
+	else:
+		_set_status("Location id=%d has %d path points" % [loc.location_id, loc.path_points.size()])
+
+
+func _add_path_point() -> void:
+	if _selected_loc_idx < 0 or _selected_loc_idx >= _locations.size():
+		_set_status("Select a location first")
+		return
+
+	var loc := _locations[_selected_loc_idx]
+	if loc == null:
+		return
+
+	var pt := Vector3(_path_x.value, _path_y.value, _path_z.value)
+	var new_points: PackedVector3Array = loc.path_points
+	new_points.append(pt)
+	loc.path_points = new_points
+	_refresh_path_list()
+	_set_status("Added path point (%.1f, %.1f, %.1f) to location id=%d" % [pt.x, pt.y, pt.z, loc.location_id])
+
+
+func _delete_selected_path_point() -> void:
+	if _selected_loc_idx < 0 or _selected_loc_idx >= _locations.size():
+		_set_status("Select a location first")
+		return
+
+	var selected := _path_list.get_selected_items()
+	if selected.is_empty():
+		_set_status("Select a path point to delete")
+		return
+
+	var loc := _locations[_selected_loc_idx]
+	if loc == null:
+		return
+
+	var idx: int = selected[0]
+	if idx < 0 or idx >= loc.path_points.size():
+		return
+
+	var pt := loc.path_points[idx]
+	var new_points: PackedVector3Array = PackedVector3Array()
+	for i in range(loc.path_points.size()):
+		if i != idx:
+			new_points.append(loc.path_points[i])
+	loc.path_points = new_points
+	_refresh_path_list()
+	_set_status("Deleted path point (%.1f, %.1f, %.1f)" % [pt.x, pt.y, pt.z])
+
+
+func _clear_path_points() -> void:
+	if _selected_loc_idx < 0 or _selected_loc_idx >= _locations.size():
+		_set_status("Select a location first")
+		return
+
+	var loc := _locations[_selected_loc_idx]
+	if loc == null:
+		return
+
+	loc.path_points = PackedVector3Array()
+	_refresh_path_list()
+	_set_status("Cleared all path points for location id=%d" % loc.location_id)
+
+
 # ---- Validation --------------------------------------------------------
 
 func _validate_and_report() -> void:
@@ -699,4 +859,5 @@ func _copy_location(source: SmartLocation) -> SmartLocation:
 	copy.max_population = source.max_population
 	copy.faction_owner_id = source.faction_owner_id
 	copy.neighbor_location_ids = source.neighbor_location_ids.duplicate()
+	copy.path_points = source.path_points.duplicate()
 	return copy
