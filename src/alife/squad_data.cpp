@@ -45,6 +45,11 @@ void SquadData::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_arrived_this_frame"), &SquadData::get_arrived_this_frame);
     ClassDB::bind_method(D_METHOD("get_computed_position"), &SquadData::get_computed_position);
 
+    // Morale methods
+    ClassDB::bind_method(D_METHOD("set_morale", "morale"), &SquadData::set_morale);
+    ClassDB::bind_method(D_METHOD("get_morale"), &SquadData::get_morale);
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "morale"), "set_morale", "get_morale");
+
     // TIER 2 goal stack methods
     ClassDB::bind_method(D_METHOD("get_active_goal"), &SquadData::get_active_goal);
     ClassDB::bind_method(D_METHOD("set_explicit_goal", "goal_id"), &SquadData::set_explicit_goal);
@@ -229,8 +234,10 @@ void SquadData::compute_formation_positions() {
 
     if (formation_type == FORMATION_MARCH_TIGHT) {
         // Tight march: compact column, members close behind
+        // Lower morale: tighter column (step * morale)
         const float side = 0.55f;
-        const float step = 0.75f;
+        const float base_step = 0.75f;
+        const float step = base_step * static_cast<float>(morale);
         if (npc_count >= 2) {
             formation_positions[1] = leader_pos - travel_dir * step + right * (-side);
         }
@@ -245,7 +252,9 @@ void SquadData::compute_formation_positions() {
         }
     } else {
         // Scattered rest: loose cluster, members spread around leader
-        const float spread = 1.6f;
+        // Lower morale: tighter cluster (spread * morale)
+        const float base_spread = 1.6f;
+        const float spread = base_spread * static_cast<float>(morale);
         if (npc_count >= 2) {
             formation_positions[1] = leader_pos + right * (-spread) + travel_dir * 0.4f;
         }
@@ -279,6 +288,16 @@ bool SquadData::get_arrived_this_frame() const {
 
 Vector3 SquadData::get_computed_position() const {
     return computed_position;
+}
+
+void SquadData::set_morale(double p_morale) {
+    morale = p_morale;
+    if (morale < 0.0) morale = 0.0;
+    if (morale > 1.0) morale = 1.0;
+}
+
+double SquadData::get_morale() const {
+    return morale;
 }
 
 int64_t SquadData::get_active_goal() const {

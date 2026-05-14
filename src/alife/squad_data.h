@@ -42,6 +42,7 @@ private:
     bool arrived_this_frame = false;
     Vector3 computed_position;
     TypedArray<Vector3> formation_positions;
+    double morale = 1.0;
 
     std::vector<int64_t> goal_stack;
 
@@ -96,6 +97,10 @@ public:
     int64_t get_formation_type() const;
     bool get_arrived_this_frame() const;
     Vector3 get_computed_position() const;
+
+    // Morale (affects formation tightness)
+    void set_morale(double p_morale);
+    double get_morale() const;
 
     // Goal stack (TIER 2 C++ migration)
     int64_t get_active_goal() const;
