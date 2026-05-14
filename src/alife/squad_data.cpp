@@ -48,6 +48,7 @@ void SquadData::_bind_methods() {
     // Morale methods
     ClassDB::bind_method(D_METHOD("set_morale", "morale"), &SquadData::set_morale);
     ClassDB::bind_method(D_METHOD("get_morale"), &SquadData::get_morale);
+    ClassDB::bind_method(D_METHOD("take_damage", "damage_amount"), &SquadData::take_damage);
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "morale"), "set_morale", "get_morale");
 
     // TIER 2 goal stack methods
@@ -298,6 +299,18 @@ void SquadData::set_morale(double p_morale) {
 
 double SquadData::get_morale() const {
     return morale;
+}
+
+void SquadData::take_damage(double damage_amount) {
+    // Reduce morale by damage amount (clamped)
+    morale -= damage_amount;
+    if (morale < 0.0) morale = 0.0;
+    
+    // At morale < 0.3, enter panic/retreat state
+    if (morale < 0.3 && squad_state == STATE_MOVING) {
+        squad_state = STATE_RESTING;
+        // Signal or log the panic state
+    }
 }
 
 int64_t SquadData::get_active_goal() const {

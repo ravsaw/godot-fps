@@ -101,6 +101,7 @@ public:
     // Morale (affects formation tightness)
     void set_morale(double p_morale);
     double get_morale() const;
+    void take_damage(double damage_amount);
 
     // Goal stack (TIER 2 C++ migration)
     int64_t get_active_goal() const;
