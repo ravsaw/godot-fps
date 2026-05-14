@@ -14,10 +14,11 @@ Zrodlo: [plan.md](../plan.md)
 - Migracja krytycznego ticku ruchu/formacji squadow do C++ oznaczona jako completed.
 - **Faza 1 (Integracja persystencji map): World layout persistence infrastructure complete.** zone_manager.gd now loads from world_layout.tres; fallback to hardcoded zones still active.
 - **Faza 2 (3D preview skeleton): WorldEditorTool @tool script added.** Visualizes SmartLocations + edges in 3D editor viewport; generates initial layout.tres on first run.
+- **Faza 3 (Bezier curves): Curve pathfinding implemented.** SmartLocation.path_points field added (C++); WorldGraph computes polyline distances; editor visualizes curves (yellow lines + control point markers).
 
 ## Co jest aktualnie priorytetem
-- Complete Faza 2: Deploy editor visuals in main.tscn; test in Godot editor.
-- Faza 3: Add path_points[] to SmartLocation; implement Bezier curve pathfinding in WorldGraph.
+- Faza 4: Path editor UI in world_builder_dock (add/edit/remove control points via UI).
+- Faza 5: Squad interpolation along curves (SquadData::tick_movement uses Bezier, but can deviate for tactics).
 
 ## Ryzyka operacyjne
 - Build i runtime sa stabilne, ale po zmianach C++ dalej wymagaja pelnej sekwencji: build + headless smoke.

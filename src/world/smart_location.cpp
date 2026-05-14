@@ -21,6 +21,8 @@ void SmartLocation::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_faction_owner_id"), &SmartLocation::get_faction_owner_id);
     ClassDB::bind_method(D_METHOD("set_neighbor_location_ids", "neighbor_location_ids"), &SmartLocation::set_neighbor_location_ids);
     ClassDB::bind_method(D_METHOD("get_neighbor_location_ids"), &SmartLocation::get_neighbor_location_ids);
+    ClassDB::bind_method(D_METHOD("set_path_points", "path_points"), &SmartLocation::set_path_points);
+    ClassDB::bind_method(D_METHOD("get_path_points"), &SmartLocation::get_path_points);
     ClassDB::bind_method(D_METHOD("to_debug_string"), &SmartLocation::to_debug_string);
 
     ADD_PROPERTY(PropertyInfo(Variant::INT, "location_id"), "set_location_id", "get_location_id");
@@ -31,6 +33,7 @@ void SmartLocation::_bind_methods() {
     ADD_PROPERTY(PropertyInfo(Variant::INT, "max_population"), "set_max_population", "get_max_population");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "faction_owner_id"), "set_faction_owner_id", "get_faction_owner_id");
     ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "neighbor_location_ids"), "set_neighbor_location_ids", "get_neighbor_location_ids");
+    ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "path_points"), "set_path_points", "get_path_points");
 }
 
 void SmartLocation::set_location_id(int64_t p_location_id) {
@@ -95,6 +98,14 @@ void SmartLocation::set_neighbor_location_ids(const PackedInt32Array &p_neighbor
 
 PackedInt32Array SmartLocation::get_neighbor_location_ids() const {
     return neighbor_location_ids;
+}
+
+void SmartLocation::set_path_points(const PackedVector3Array &p_path_points) {
+    path_points = p_path_points;
+}
+
+PackedVector3Array SmartLocation::get_path_points() const {
+    return path_points;
 }
 
 String SmartLocation::to_debug_string() const {

@@ -108,7 +108,11 @@ func _rebuild_editor_visuals() -> void:
 		for neighbor_id in loc.neighbor_location_ids:
 			var neighbor: SmartLocation = location_map.get(neighbor_id, null)
 			if neighbor != null and loc.zone_id == neighbor.zone_id:
-				_draw_edge(_visual_root, loc.world_position, neighbor.world_position)
+				# Draw Bezier curve if path_points defined, otherwise draw straight line
+				if loc.path_points.size() > 0:
+					_draw_bezier_curve(_visual_root, loc.world_position, neighbor.world_position, loc.path_points)
+				else:
+					_draw_edge(_visual_root, loc.world_position, neighbor.world_position)
 
 
 func _draw_location_marker(parent: Node3D, location: SmartLocation) -> void:
@@ -167,6 +171,46 @@ func _draw_edge(parent: Node3D, from_pos: Vector3, to_pos: Vector3) -> void:
 	mat.wire_frame = false
 	line.material = mat
 	parent.add_child(line)
+
+
+func _draw_bezier_curve(parent: Node3D, from_pos: Vector3, to_pos: Vector3, control_points: PackedVector3Array) -> void:
+	# Draw Bezier curve as a polyline through control points
+	var line := MeshInstance3D.new()
+	var mesh := ImmediateMesh.new()
+	mesh.surface_begin(Mesh.PRIMITIVE_LINES)
+	
+	# Draw from start to control points to end
+	var current_pos := from_pos
+	for control_point in control_points:
+		mesh.surface_add_vertex(current_pos)
+		mesh.surface_add_vertex(control_point)
+		current_pos = control_point
+	
+	# Final segment to end
+	mesh.surface_add_vertex(current_pos)
+	mesh.surface_add_vertex(to_pos)
+	mesh.surface_end()
+	line.mesh = mesh
+	
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(1.0, 0.8, 0.2, 1.0)  # Yellow for Bezier curves
+	mat.wire_frame = false
+	line.material = mat
+	parent.add_child(line)
+	
+	# Draw control points as small markers
+	for control_point in control_points:
+		var marker := MeshInstance3D.new()
+		var sphere := SphereMesh.new()
+		sphere.radii = Vector3.ONE * 0.15
+		marker.mesh = sphere
+		marker.position = control_point
+		
+		var ctrl_mat := StandardMaterial3D.new()
+		ctrl_mat.albedo_color = Color(1.0, 0.8, 0.0, 0.8)  # Darker yellow
+		marker.material = ctrl_mat
+		parent.add_child(marker)
 
 
 func _build_locations_for_zone(zone_id: StringName) -> Array[SmartLocation]:

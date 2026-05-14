@@ -3,6 +3,7 @@
 
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/vector3.hpp>
@@ -21,6 +22,7 @@ private:
     int64_t max_population = 6;
     int64_t faction_owner_id = -1;
     PackedInt32Array neighbor_location_ids;
+    PackedVector3Array path_points;
 
 protected:
     static void _bind_methods();
@@ -49,6 +51,9 @@ public:
 
     void set_neighbor_location_ids(const PackedInt32Array &p_neighbor_location_ids);
     PackedInt32Array get_neighbor_location_ids() const;
+
+    void set_path_points(const PackedVector3Array &p_path_points);
+    PackedVector3Array get_path_points() const;
 
     String to_debug_string() const;
 };

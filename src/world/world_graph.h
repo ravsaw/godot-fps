@@ -40,6 +40,7 @@ public:
 private:
     void rebuild_edges();
     int64_t pop_closest_pending(std::vector<int64_t> &p_pending, const std::unordered_map<int64_t, double> &p_distances) const;
+    double compute_bezier_curve_length(const Vector3 &p_start, const Vector3 &p_end, const PackedVector3Array &p_control_points) const;
 };
 
 } // namespace godot
