@@ -12,12 +12,16 @@ Zrodlo: [plan.md](../plan.md)
 - Stabilizacja transition 2D/3D pod obciazeniem (budget + throttling).
 - Sprint 1 (ALife Core Hardening) oznaczony jako completed.
 - Migracja krytycznego ticku ruchu/formacji squadow do C++ oznaczona jako completed.
+- **Faza 1 (Integracja persystencji map): World layout persistence infrastructure complete.** zone_manager.gd now loads from world_layout.tres; fallback to hardcoded zones still active.
+- **Faza 2 (3D preview skeleton): WorldEditorTool @tool script added.** Visualizes SmartLocations + edges in 3D editor viewport; generates initial layout.tres on first run.
 
 ## Co jest aktualnie priorytetem
-- Sprint 2 Event Bus MVP i pelny loop cause -> consequence -> action.
+- Complete Faza 2: Deploy editor visuals in main.tscn; test in Godot editor.
+- Faza 3: Add path_points[] to SmartLocation; implement Bezier curve pathfinding in WorldGraph.
 
 ## Ryzyka operacyjne
 - Build i runtime sa stabilne, ale po zmianach C++ dalej wymagaja pelnej sekwencji: build + headless smoke.
+- Editor @tool scripts may cause hot-reload issues; restart editor if visuals don't update.
 
 ## Minimalna checklista po zmianie gameplay
 1. Build GDExtension przechodzi.
