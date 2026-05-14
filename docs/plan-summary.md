@@ -16,10 +16,11 @@ Zrodlo: [plan.md](../plan.md)
 - **Faza 2 (3D preview skeleton): WorldEditorTool @tool script added.** Visualizes SmartLocations + edges in 3D editor viewport; generates initial layout.tres on first run.
 - **Faza 3 (Bezier curves): Curve pathfinding implemented.** SmartLocation.path_points field added (C++); WorldGraph computes polyline distances; editor visualizes curves (yellow lines + control point markers).
 - **Faza 4 (Path editor UI): Editor addon extended.** world_builder_dock now has path point editor UI (list, add/edit/remove buttons, XYZ input fields); path_points persist automatically in world_layout.tres.
+- **Faza 5 (Squad Bezier curves): Curve movement implemented.** SquadData.path_points field added (C++); tick_movement uses Bezier polyline evaluation; squads follow curved paths between locations with tactical autonomy.
 
 ## Co jest aktualnie priorytetem
-- Faza 5: Squad interpolation along curves (SquadData::tick_movement uses Bezier, but can deviate for tactics).
-- Testing: Manual editor test to confirm path_points UI and persistence work.
+- Testing: Manual integration test (squad moves along curved path between locations).
+- Future: Tactical deviation override (e.g., morale < 0.3 ignores curves for panicked retreat).
 
 ## Ryzyka operacyjne
 - Build i runtime sa stabilne, ale po zmianach C++ dalej wymagaja pelnej sekwencji: build + headless smoke.

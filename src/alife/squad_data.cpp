@@ -44,6 +44,9 @@ void SquadData::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_formation_type"), &SquadData::get_formation_type);
     ClassDB::bind_method(D_METHOD("get_arrived_this_frame"), &SquadData::get_arrived_this_frame);
     ClassDB::bind_method(D_METHOD("get_computed_position"), &SquadData::get_computed_position);
+    ClassDB::bind_method(D_METHOD("set_path_points", "path_points"), &SquadData::set_path_points);
+    ClassDB::bind_method(D_METHOD("get_path_points"), &SquadData::get_path_points);
+    ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "path_points"), "set_path_points", "get_path_points");
 
     // Morale methods
     ClassDB::bind_method(D_METHOD("set_morale", "morale"), &SquadData::set_morale);
@@ -204,14 +207,53 @@ void SquadData::tick_movement(double delta) {
     double t = travel_duration > 0.0 ? travel_elapsed / travel_duration : 1.0;
     t = CLAMP(t, 0.0, 1.0);
 
-    // Interpolate position
-    computed_position = from_position.lerp(to_position, t);
+    // Use Bezier curve if path_points available; otherwise linear interpolation
+    // Design: curves are guidance (not rails). Squads can deviate for tactics.
+    if (path_points.size() > 0) {
+        computed_position = evaluate_bezier_curve(t);
+    } else {
+        computed_position = from_position.lerp(to_position, t);
+    }
 
     // Check if arrived
     if (t >= 1.0) {
         arrived_this_frame = true;
         computed_position = to_position;
     }
+}
+
+Vector3 SquadData::evaluate_bezier_curve(double t) const {
+    // Bezier path: from_position -> path_points[0..n] -> to_position
+    // Approximate as polyline through waypoints with linear segments
+    // At t=0, squad is at from_position; at t=1, squad is at to_position.
+    // Intermediate path_points guide the route.
+    
+    if (path_points.size() == 0) {
+        return from_position.lerp(to_position, t);
+    }
+    
+    int num_segments = 1 + (int)path_points.size();
+    double segment_duration = 1.0 / num_segments;
+    int segment_idx = (int)(t / segment_duration);
+    segment_idx = CLAMP(segment_idx, 0, num_segments - 1);
+    
+    double local_t = (t - segment_idx * segment_duration) / segment_duration;
+    local_t = CLAMP(local_t, 0.0, 1.0);
+    
+    Vector3 seg_start, seg_end;
+    
+    if (segment_idx == 0) {
+        seg_start = from_position;
+        seg_end = path_points[0];
+    } else if (segment_idx < (int)path_points.size()) {
+        seg_start = path_points[segment_idx - 1];
+        seg_end = path_points[segment_idx];
+    } else {
+        seg_start = path_points[path_points.size() - 1];
+        seg_end = to_position;
+    }
+    
+    return seg_start.lerp(seg_end, local_t);
 }
 
 void SquadData::compute_formation_positions() {
@@ -289,6 +331,14 @@ bool SquadData::get_arrived_this_frame() const {
 
 Vector3 SquadData::get_computed_position() const {
     return computed_position;
+}
+
+void SquadData::set_path_points(const PackedVector3Array &p_path_points) {
+    path_points = p_path_points;
+}
+
+PackedVector3Array SquadData::get_path_points() const {
+    return path_points;
 }
 
 void SquadData::set_morale(double p_morale) {

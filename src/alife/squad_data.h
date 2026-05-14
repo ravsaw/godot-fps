@@ -43,6 +43,7 @@ private:
     Vector3 computed_position;
     TypedArray<Vector3> formation_positions;
     double morale = 1.0;
+    PackedVector3Array path_points;  // Bezier curve waypoints between locations
 
     std::vector<int64_t> goal_stack;
 
@@ -97,6 +98,12 @@ public:
     int64_t get_formation_type() const;
     bool get_arrived_this_frame() const;
     Vector3 get_computed_position() const;
+
+    void set_path_points(const PackedVector3Array &p_path_points);
+    PackedVector3Array get_path_points() const;
+
+    // Bezier curve evaluation for smooth movement
+    Vector3 evaluate_bezier_curve(double t) const;
 
     // Morale (affects formation tightness)
     void set_morale(double p_morale);
