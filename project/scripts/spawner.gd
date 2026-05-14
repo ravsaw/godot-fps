@@ -165,11 +165,11 @@ func spawn_environment(scene_root: Node3D) -> void:
 	world_env.environment = env
 	scene_root.add_child(world_env)
 
-	_spawn_zone_floor(scene_root, "FloorZoneA", Vector3(0.0, 0.0, 0.0), Vector3(24, 0.5, 26), Color(0.22, 0.32, 0.18))
-	_spawn_zone_floor(scene_root, "FloorZoneTAB", Vector3(18.0, 0.0, 0.0), Vector3(12, 0.5, 12), Color(0.18, 0.34, 0.42))
-	_spawn_zone_floor(scene_root, "FloorZoneB", Vector3(36.0, 0.0, 0.0), Vector3(24, 0.5, 26), Color(0.45, 0.25, 0.15))
-	_spawn_zone_floor(scene_root, "FloorZoneTBC", Vector3(54.0, 0.0, 0.0), Vector3(12, 0.5, 12), Color(0.20, 0.30, 0.48))
-	_spawn_zone_floor(scene_root, "FloorZoneC", Vector3(72.0, 0.0, 0.0), Vector3(24, 0.5, 26), Color(0.28, 0.22, 0.38))
+	_spawn_zone_floor(scene_root, "FloorZoneA", Vector3(0.0, 0.0, 0.0), Vector3(48, 0.5, 56), Color(0.22, 0.32, 0.18))
+	_spawn_zone_floor(scene_root, "FloorZoneTAB", Vector3(36.0, 0.0, 0.0), Vector3(24, 0.5, 28), Color(0.18, 0.34, 0.42))
+	_spawn_zone_floor(scene_root, "FloorZoneB", Vector3(72.0, 0.0, 0.0), Vector3(48, 0.5, 56), Color(0.45, 0.25, 0.15))
+	_spawn_zone_floor(scene_root, "FloorZoneTBC", Vector3(108.0, 0.0, 0.0), Vector3(24, 0.5, 28), Color(0.20, 0.30, 0.48))
+	_spawn_zone_floor(scene_root, "FloorZoneC", Vector3(144.0, 0.0, 0.0), Vector3(48, 0.5, 56), Color(0.28, 0.22, 0.38))
 
 
 func spawn_loot_item(
@@ -238,6 +238,77 @@ func spawn_navigation_region(scene_root: Node3D) -> void:
 	nav_mesh.agent_max_climb = 0.4
 
 	nav_region.navigation_mesh = nav_mesh
+
+
+func spawn_test_area(scene_root: Node3D) -> void:
+	const ROOM_W: float = 20.0
+	const ROOM_D: float = 20.0
+	const WALL_H: float = 5.0
+	const WALL_T: float = 0.5
+
+	# Floor
+	_spawn_box(scene_root, "TestFloor",
+		Vector3(0, -0.25, 0),
+		Vector3(ROOM_W, 0.5, ROOM_D),
+		Color(0.30, 0.30, 0.30))
+
+	# Ceiling
+	_spawn_box(scene_root, "TestCeiling",
+		Vector3(0, WALL_H + 0.25, 0),
+		Vector3(ROOM_W, 0.5, ROOM_D),
+		Color(0.20, 0.20, 0.20))
+
+	# North wall
+	_spawn_box(scene_root, "WallN",
+		Vector3(0, WALL_H * 0.5, -ROOM_D * 0.5 - WALL_T * 0.5),
+		Vector3(ROOM_W + WALL_T * 2, WALL_H, WALL_T),
+		Color(0.38, 0.35, 0.30))
+
+	# South wall
+	_spawn_box(scene_root, "WallS",
+		Vector3(0, WALL_H * 0.5, ROOM_D * 0.5 + WALL_T * 0.5),
+		Vector3(ROOM_W + WALL_T * 2, WALL_H, WALL_T),
+		Color(0.38, 0.35, 0.30))
+
+	# West wall
+	_spawn_box(scene_root, "WallW",
+		Vector3(-ROOM_W * 0.5 - WALL_T * 0.5, WALL_H * 0.5, 0),
+		Vector3(WALL_T, WALL_H, ROOM_D),
+		Color(0.35, 0.32, 0.28))
+
+	# East wall
+	_spawn_box(scene_root, "WallE",
+		Vector3(ROOM_W * 0.5 + WALL_T * 0.5, WALL_H * 0.5, 0),
+		Vector3(WALL_T, WALL_H, ROOM_D),
+		Color(0.35, 0.32, 0.28))
+
+	# A few low boxes to jump on
+	_spawn_box(scene_root, "CrateA", Vector3(-4, 0.5, -4), Vector3(1.4, 1.0, 1.4), Color(0.55, 0.40, 0.20))
+	_spawn_box(scene_root, "CrateB", Vector3(4, 0.5, 3), Vector3(1.4, 1.0, 1.4), Color(0.55, 0.40, 0.20))
+	_spawn_box(scene_root, "CrateC", Vector3(0, 1.0, -6), Vector3(1.4, 2.0, 1.4), Color(0.50, 0.36, 0.18))
+
+
+func _spawn_box(scene_root: Node3D, node_name: String, pos: Vector3, size: Vector3, color: Color) -> void:
+	var body := StaticBody3D.new()
+	body.name = node_name
+	body.position = pos
+	scene_root.add_child(body)
+
+	var col := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = size
+	col.shape = shape
+	body.add_child(col)
+
+	var mesh := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = size
+	mesh.mesh = box
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.roughness = 0.85
+	mesh.material_override = mat
+	body.add_child(mesh)
 
 
 func set_loaded_zones(scene_root: Node3D, loaded_zones: Array[StringName]) -> void:

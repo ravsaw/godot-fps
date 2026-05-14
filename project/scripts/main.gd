@@ -9,7 +9,7 @@ const TRANSITION_MANAGER_SCRIPT := preload("res://scripts/transition_manager.gd"
 const MAP_COMMAND_CONTROLLER_SCRIPT := preload("res://scripts/map_command_controller.gd")
 const DEBUG_OVERLAY_COMPOSER_SCRIPT := preload("res://scripts/debug_overlay_composer.gd")
 
-enum DebugMode { NONE = 0, NPC_PICKUPS = 1, NPC_LOCATIONS = 2, ZONE_TRANSITIONS = 3, EVENT_SYSTEM_TEST = 4 }
+enum DebugMode { NONE = 0, NPC_PICKUPS = 1, NPC_LOCATIONS = 2, ZONE_TRANSITIONS = 3, EVENT_SYSTEM_TEST = 4, TEST_AREA = 5 }
 
 var _debug_mode: DebugMode = DebugMode.NONE
 var _menu_layer: CanvasLayer = null
@@ -39,6 +39,11 @@ var _alife_manager: Variant = null
 var _transition_manager: Variant = null
 var _map_command_controller: Variant = null
 var _debug_overlay_composer: Variant = null
+var _log_window: Window = null
+var _log_view: RichTextLabel = null
+var _log_lines: Array[String] = []
+var _log_window_prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_VISIBLE
+const LOG_LINE_LIMIT: int = 300
 var _gate_beacon: Node3D = null
 var _transition_target_zone: StringName = &""
 var _transition_commit_trigger: Area3D = null
@@ -47,6 +52,7 @@ var _transition_from_gate_id: int = -1
 
 func _ready() -> void:
 	print("Main scene loaded")
+	ProjectSettings.set_setting("display/window/subwindows/embed_subwindows", false)
 	_debug_overlay_composer = DEBUG_OVERLAY_COMPOSER_SCRIPT.new()
 
 	_npc_manager = NpcManager.new()
@@ -66,11 +72,13 @@ func _ready() -> void:
 
 	_npc_manager.configure_spawn(_spawner, self)
 	_npc_manager.npc_spawned.connect(_on_npc_spawned)
+	_setup_log_window()
+	_log_message("Main scene loaded")
 
 	if ClassDB.class_exists("GameBootstrap"):
 		var bootstrap: Variant = ClassDB.instantiate("GameBootstrap")
 		add_child(bootstrap)
-		print("GameBootstrap instantiated from GDExtension")
+		_log_message("GameBootstrap instantiated from GDExtension")
 
 	_show_debug_menu()
 
@@ -134,6 +142,14 @@ func _show_debug_menu() -> void:
 		DebugMode.EVENT_SYSTEM_TEST
 	))
 
+	vbox.add_child(_make_separator())
+
+	vbox.add_child(_make_map_button(
+		"5 — Obszar Testowy",
+		"Zamknięty pokój z sufitem i skrzynkami.\nChodzenie, skakanie, broń. Brak ALife.",
+		DebugMode.TEST_AREA
+	))
+
 
 func _make_separator() -> HSeparator:
 	return HSeparator.new()
@@ -180,6 +196,8 @@ func _on_map_selected(mode: DebugMode) -> void:
 			_boot_zone_transitions()
 		DebugMode.EVENT_SYSTEM_TEST:
 			_boot_event_system_test()
+		DebugMode.TEST_AREA:
+			_boot_test_area()
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +288,7 @@ func _boot_zone_transitions() -> void:
 	# Spawn near current region edge gate.
 	# Use .position (local) — player added via call_deferred, not in tree yet
 	if _player != null and is_instance_valid(_player):
-		_player.position = Vector3(8, 2, 0)
+		_player.position = Vector3(18, 2, 0)
 
 	_world_debug = WORLD_DEBUG_MANAGER_SCRIPT.new()
 	add_child(_world_debug)
@@ -318,6 +336,21 @@ func _on_alife_telemetry(msg: String) -> void:
 
 
 # ---------------------------------------------------------------------------
+# Mode 5: Enclosed Test Area
+# ---------------------------------------------------------------------------
+
+func _boot_test_area() -> void:
+	if _player != null and is_instance_valid(_player):
+		_player.position = Vector3(0, 2, 0)
+
+	_spawner.spawn_test_area(self)
+
+	_show_event("Map 5: Obszar Testowy")
+	_show_event("Pokój 20x20, skrzynki, broń, grawitacja.")
+	_show_event("[F1] Powrót do menu")
+
+
+# ---------------------------------------------------------------------------
 # Continuing processing / input (same for all modes)
 # ---------------------------------------------------------------------------
 
@@ -351,6 +384,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _handle_global_key_input(keycode: Key) -> bool:
+	if keycode == KEY_QUOTELEFT:
+		_toggle_log_window()
+		return true
+
 	if keycode == KEY_F1 and _debug_mode != DebugMode.NONE:
 		_teardown_world()
 		_show_debug_menu()
@@ -408,6 +445,55 @@ func _setup_debug_hud() -> void:
 	add_child(hud_layer)
 	_hud = hud_layer
 	_inventory_manager.set_hud(_hud)
+
+
+func _setup_log_window() -> void:
+	if _log_window != null and is_instance_valid(_log_window):
+		return
+
+	_log_window = Window.new()
+	_log_window.name = "LogWindow"
+	_log_window.title = "Project Logs"
+	_log_window.mode = Window.MODE_WINDOWED
+	_log_window.size = Vector2i(760, 420)
+	_log_window.position = Vector2i(32, 32)
+	_log_window.always_on_top = true
+	_log_window.visible = false
+	add_child(_log_window)
+
+	var panel := PanelContainer.new()
+	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_log_window.add_child(panel)
+
+	var margin := MarginContainer.new()
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.add_theme_constant_override("margin_left", 8)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	panel.add_child(margin)
+
+	var logs := RichTextLabel.new()
+	logs.name = "LogView"
+	logs.scroll_following = true
+	logs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	logs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	logs.text = "Logs will appear here."
+	margin.add_child(logs)
+	_log_view = logs
+
+
+func _toggle_log_window() -> void:
+	if _log_window == null or not is_instance_valid(_log_window):
+		return
+	if not _log_window.visible:
+		_log_window_prev_mouse_mode = Input.get_mouse_mode()
+		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+		_log_window.visible = true
+		_log_window.show()
+	else:
+		_log_window.visible = false
+		Input.set_mouse_mode(_log_window_prev_mouse_mode)
 
 
 func _setup_map_camera() -> void:
@@ -561,8 +647,20 @@ func _try_respawn_player() -> void:
 
 
 func _show_event(message: String) -> void:
+	_log_message(message)
 	if _hud != null and _hud.has_method("show_event"):
 		_hud.call("show_event", message)
+
+
+func _log_message(message: String) -> void:
+	if message.is_empty():
+		return
+	_log_lines.append(message)
+	if _log_lines.size() > LOG_LINE_LIMIT:
+		_log_lines = _log_lines.slice(_log_lines.size() - LOG_LINE_LIMIT, _log_lines.size())
+	if _log_view != null:
+		_log_view.text = "\n".join(_log_lines)
+		_log_view.scroll_following = true
 
 
 func _show_hitmarker() -> void:
@@ -576,7 +674,7 @@ func _on_player_died() -> void:
 
 
 func _on_npc_died(p_npc_id: int, p_source_id: int) -> void:
-	print("NPC died:", p_npc_id, "source:", p_source_id)
+	_log_message("NPC died: %d source: %d" % [p_npc_id, p_source_id])
 	_show_event("NPC " + str(p_npc_id) + " down")
 	var death_loc_key: String = _resolve_location_key_from_world_pos(_player.global_position if _player != null and is_instance_valid(_player) else Vector3.ZERO)
 	_publish_runtime_cause(&"DEATH", death_loc_key, {
@@ -831,13 +929,15 @@ func _on_zone_gate_entered(body: Node3D, target_zone_id: StringName, from_locati
 		return
 	if _player == null or not is_instance_valid(_player):
 		return
-	if body != _player:
+	if body == null:
+		return
+	if body != _player and not _player.is_ancestor_of(body):
 		return
 	if _zone_manager.get_current_zone_id() == target_zone_id or _zone_manager.is_transitioning():
 		return
 
 	_transition_from_gate_id = from_location_id
-	_zone_transition_cooldown = 2.0
+	_zone_transition_cooldown = 0.75
 	_zone_manager.request_zone_transition(target_zone_id)
 
 
@@ -888,8 +988,8 @@ func _spawn_transition_guide(from_zone_id: StringName, to_zone_id: StringName) -
 	if distance > 0.05:
 		var corridor := MeshInstance3D.new()
 		var mesh := CylinderMesh.new()
-		mesh.top_radius = 0.55
-		mesh.bottom_radius = 0.55
+		mesh.top_radius = 1.4
+		mesh.bottom_radius = 1.4
 		mesh.height = distance
 		corridor.mesh = mesh
 		corridor.position = from_pos + delta * 0.5 + Vector3(0, 1.0, 0)
@@ -904,13 +1004,46 @@ func _spawn_transition_guide(from_zone_id: StringName, to_zone_id: StringName) -
 		corridor.material_override = mat
 		guide.add_child(corridor)
 
+		# Bright transition band at midpoint so region change area is obvious.
+		var transition_band := MeshInstance3D.new()
+		var band_mesh := CylinderMesh.new()
+		band_mesh.top_radius = 4.4
+		band_mesh.bottom_radius = 4.4
+		band_mesh.height = 0.45
+		transition_band.mesh = band_mesh
+		transition_band.position = from_pos + delta * 0.5 + Vector3(0, 0.95, 0)
+		var band_mat := StandardMaterial3D.new()
+		band_mat.albedo_color = Color(0.15, 0.95, 1.0, 0.55)
+		band_mat.emission_enabled = true
+		band_mat.emission = Color(0.15, 0.95, 1.0)
+		band_mat.emission_energy_multiplier = 3.0
+		band_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		transition_band.material_override = band_mat
+		guide.add_child(transition_band)
+
+		var transition_beacon := MeshInstance3D.new()
+		var beacon_mesh := CylinderMesh.new()
+		beacon_mesh.top_radius = 0.7
+		beacon_mesh.bottom_radius = 0.7
+		beacon_mesh.height = 8.0
+		transition_beacon.mesh = beacon_mesh
+		transition_beacon.position = from_pos + delta * 0.5 + Vector3(0, 4.0, 0)
+		var beacon_mat := StandardMaterial3D.new()
+		beacon_mat.albedo_color = Color(0.2, 1.0, 1.0, 0.35)
+		beacon_mat.emission_enabled = true
+		beacon_mat.emission = Color(0.2, 1.0, 1.0)
+		beacon_mat.emission_energy_multiplier = 3.5
+		beacon_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		transition_beacon.material_override = beacon_mat
+		guide.add_child(transition_beacon)
+
 	var commit_area := Area3D.new()
 	commit_area.name = "TransitionCommitTrigger"
 	commit_area.position = to_pos + Vector3(0, 0.85, 0)
 	var shape := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
-	capsule.radius = 1.6
-	capsule.height = 2.2
+	capsule.radius = 3.2
+	capsule.height = 3.8
 	shape.shape = capsule
 	commit_area.add_child(shape)
 	commit_area.body_entered.connect(_on_transition_commit_entered)
