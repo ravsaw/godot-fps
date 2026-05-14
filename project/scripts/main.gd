@@ -18,6 +18,9 @@ var _player: Variant = null
 var _weapon: Variant = null
 var _npc: Variant = null
 var _hud: Variant = null
+var _test_enemy_npc: Variant = null
+var _test_enemy_squad: Variant = null
+var _test_enemy_last_health: float = -1.0
 
 var _respawn_ttl: float = -1.0
 var _zone_transition_cooldown: float = 0.0
@@ -344,9 +347,32 @@ func _boot_test_area() -> void:
 		_player.position = Vector3(0, 2, 0)
 
 	_spawner.spawn_test_area(self)
-
+	
+	# Spawn test NPC with squad
+	var test_npc: Variant = _spawner.spawn_npc()
+	if test_npc != null:
+		test_npc.position = Vector3(5, 1, 5)
+		
+		# Create test squad for the NPC
+		var test_squad: Variant = null
+		if ClassDB.class_exists("SquadData"):
+			test_squad = ClassDB.instantiate("SquadData")
+		if test_squad != null:
+			test_squad.set_squad_name("TestEnemy")
+			test_squad.set_faction_id(2)
+			test_squad.set_npc_count(1)
+			test_squad.set_morale(1.0)
+		
+		# Attach squad reference to NPC so damage can flow through
+		if test_squad != null:
+			test_npc.set_meta("squad_ref", test_squad)
+			_test_enemy_npc = test_npc
+			_test_enemy_squad = test_squad
+			_test_enemy_last_health = test_npc.get_health()
+	
 	_show_event("Map 5: Obszar Testowy")
 	_show_event("Pokój 20x20, skrzynki, broń, grawitacja.")
+	_show_event("Test enemy spawned with morale system active.")
 	_show_event("[F1] Powrót do menu")
 
 
@@ -359,11 +385,34 @@ func _process(delta: float) -> void:
 	if _npc_manager != null:
 		_npc_manager.process(delta)
 
+	_sync_test_enemy_morale_from_health()
+
 	if _zone_transition_cooldown > 0.0:
 		_zone_transition_cooldown = maxf(0.0, _zone_transition_cooldown - delta)
 
 	_update_respawn_timers(delta)
 	_update_debug_hud(delta)
+
+
+func _sync_test_enemy_morale_from_health() -> void:
+	if _debug_mode != DebugMode.TEST_AREA:
+		return
+	if _test_enemy_npc == null or not is_instance_valid(_test_enemy_npc):
+		return
+	if _test_enemy_squad == null:
+		return
+	if not _test_enemy_npc.has_method("get_health"):
+		return
+
+	var hp: float = _test_enemy_npc.get_health()
+	if _test_enemy_last_health < 0.0:
+		_test_enemy_last_health = hp
+		return
+
+	var damage_taken: float = _test_enemy_last_health - hp
+	if damage_taken > 0.0 and _test_enemy_squad.has_method("take_damage"):
+		_test_enemy_squad.take_damage(damage_taken * 0.05)
+	_test_enemy_last_health = hp
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -853,6 +902,9 @@ func _teardown_world() -> void:
 	_weapon = null
 	_npc = null
 	_hud = null
+	_test_enemy_npc = null
+	_test_enemy_squad = null
+	_test_enemy_last_health = -1.0
 	_map_camera = null
 	_world_debug = null
 	_squad_manager = null
