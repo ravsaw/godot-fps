@@ -28,6 +28,22 @@ godot-fps/
 └── gdextension.gdextension  # extension manifest
 ```
 
+## Documentation Upkeep (Required)
+
+When working in this repository, treat `docs/` as part of the source of truth.
+
+- Before implementing medium/large changes, read:
+	- `docs/code-map.md`
+	- relevant files in `docs/segments/`
+	- `docs/plan-summary.md` (for current progress snapshot)
+- After changing behavior, architecture boundaries, or ownership of logic, update:
+	- the relevant `docs/segments/*.md` file(s)
+	- `docs/code-map.md` if navigation or ownership changed
+	- `docs/plan-summary.md` if delivered scope/status changed
+- Documentation updates are part of Definition of Done for non-trivial tasks.
+- Keep docs concise and operational: role, key files, flow, dependencies, quick debug checks.
+- Do not rewrite unrelated docs sections; only adjust what your change affects.
+
 ## Build
 
 ```sh
