@@ -84,6 +84,22 @@ func _add_location_node(location: SmartLocation) -> void:
 	_root.add_child(label)
 
 	if location.location_type == &"gate":
+		var portal := MeshInstance3D.new()
+		var portal_mesh := CylinderMesh.new()
+		portal_mesh.top_radius = 0.65
+		portal_mesh.bottom_radius = 0.65
+		portal_mesh.height = 5.2
+		portal.mesh = portal_mesh
+		portal.position = location.world_position + Vector3(0, 2.6, 0)
+		var portal_mat := StandardMaterial3D.new()
+		portal_mat.albedo_color = Color(0.1, 0.95, 1.0, 0.35)
+		portal_mat.emission_enabled = true
+		portal_mat.emission = Color(0.1, 0.95, 1.0)
+		portal_mat.emission_energy_multiplier = 2.6
+		portal_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		portal.material_override = portal_mat
+		_root.add_child(portal)
+
 		_add_gate_trigger(location)
 
 
@@ -124,11 +140,15 @@ func _add_gate_trigger(location: SmartLocation) -> void:
 	var trigger := Area3D.new()
 	trigger.name = "GateTrigger_%d" % location.location_id
 	trigger.position = location.world_position + Vector3(0, 0.85, 0)
+	trigger.monitoring = true
+	trigger.monitorable = true
+	trigger.collision_layer = 0
+	trigger.collision_mask = 0x7fffffff
 
 	var shape := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
-	capsule.radius = 1.2
-	capsule.height = 1.8
+	capsule.radius = 2.8
+	capsule.height = 3.2
 	shape.shape = capsule
 	trigger.add_child(shape)
 

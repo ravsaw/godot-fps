@@ -21,6 +21,7 @@ const FACTION_SCAVENGERS: int = 1
 const FACTION_THRESHOLD_GUARDIANS: int = 2
 const GRAPH_ZONE_STRIDE: int = 1000
 const INVALID_LOCATION_ID: int = -1
+const WORLD_LAYOUT_SCALE: float = 2.0
 
 const LAYOUT_PATH := "res://data/world_layout.tres"
 
@@ -750,7 +751,7 @@ func _make_location(
 	location.location_name = location_name
 	location.location_type = location_type
 	location.zone_id = zone_id
-	location.world_position = world_position
+	location.world_position = Vector3(world_position.x * WORLD_LAYOUT_SCALE, world_position.y, world_position.z * WORLD_LAYOUT_SCALE)
 	location.faction_owner_id = _get_default_owner_for(location_type)
 	location.neighbor_location_ids = neighbors
 	return location

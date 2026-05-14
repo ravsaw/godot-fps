@@ -18,6 +18,10 @@ config/features=PackedStringArray("4.6")
 
 enabled=PackedStringArray("res://addons/world_builder/plugin.cfg")
 
+[display/window/subwindows]
+
+embed_subwindows=false
+
 [input]
 
 move_forward={
